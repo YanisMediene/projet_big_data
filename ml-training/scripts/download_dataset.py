@@ -41,7 +41,9 @@ DATA_DIR = "./data/raw"
 
 def download_category(category: str) -> bool:
     """Download .npy file for a single category"""
-    url = f"{BASE_URL}/{category}.npy"
+    # Handle special case: smiley_face → smiley face (with space)
+    url_category = category.replace("_", " ")
+    url = f"{BASE_URL}/{url_category}.npy"
     filepath = os.path.join(DATA_DIR, f"{category}.npy")
 
     # Skip if already downloaded
