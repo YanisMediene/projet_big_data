@@ -1,0 +1,26 @@
+# Machine Learning
+tensorflow==2.15.0
+keras==2.15.0
+numpy==1.26.4
+
+# Data Processing
+h5py==3.10.0
+pillow==10.2.0
+scikit-learn==1.4.0
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.2
+
+# Jupyter
+jupyter==1.0.0
+ipykernel==6.29.0
+notebook==7.0.7
+
+# Firebase (for retraining pipeline)
+firebase-admin==6.4.0
+
+# Utilities
+python-dotenv==1.0.1
+tqdm==4.66.1
+requests==2.31.0
