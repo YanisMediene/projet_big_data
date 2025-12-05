@@ -1,7 +1,7 @@
 # 📝 Technical Defense Justifications
 
 **AI Pictionary - Big Data Project FISE3**  
-**Date:** January 15, 2026 (Intermediate Defense) / February 13, 2026 (Final Defense)
+**Date:** December 2025 (Preparation) / January 15, 2026 (Defense)
 
 ---
 
@@ -30,19 +30,22 @@ AI Pictionary is a cloud-native machine learning drawing recognition application
 
 ### Tech Stack
 | Layer | Technology | Version |
-|-------|-----------|---------|
-| **Frontend** | React + Tailwind CSS | 18.x / 3.x |
-| **Backend** | FastAPI (Python) | 0.109.x |
-| **ML Engine** | TensorFlow/Keras | 2.15.x |
-| **Cloud** | Firebase (Auth, Firestore, Storage) | 10.x |
+|-------|-----------|---------||
+| **Frontend** | React + Tailwind CSS | 19.2.1 / 3.4.1 |
+| **Backend** | FastAPI (Python) | 0.109.2 |
+| **ML Engine** | TensorFlow/Keras | 2.16.2 |
+| **Cloud** | Firebase Hosting + Cloud Run | 10.8.0 / europe-west1 |
 | **Dataset** | Google Quick Draw (20 categories) | 1.4M images |
 
 ### Key Metrics (v1.0.0)
 - **Accuracy:** 91-93% (test set)
-- **Latency:** <10ms per inference
-- **Model Size:** 140 KB
-- **Parameters:** ~35,000
-- **Cost:** <$1/month (100 DAU)
+- **Latency:** 8-12ms per inference (Cloud Run), 113-327ms end-to-end
+- **Model Size:** 140 KB (.h5 file), ~500MB Docker image
+- **Parameters:** ~50,000
+- **Cost:** <$1/month (100 DAU) - Free tier
+- **Production URLs:**
+  - Frontend: https://ai-pictionary-4f8f2.web.app
+  - Backend: https://ai-pictionary-backend-1064461234232.europe-west1.run.app
 
 ---
 
@@ -78,7 +81,62 @@ AI Pictionary is a cloud-native machine learning drawing recognition application
 
 ---
 
-### 3. Model Deployment: FastAPI Startup Loading vs Alternatives
+### 3. Backend Deployment: Cloud Run vs Cloud Functions
+
+| Aspect | Cloud Run ✅ | Cloud Functions Gen2 | Verdict |
+|--------|--------------|---------------------|---------||
+| **Container Support** | ✅ Custom Dockerfile | ✅ Buildpacks | **Cloud Run** |
+| **Memory Limit** | 32 GB max | 16 GB max | **Cloud Run** |
+| **TensorFlow Support** | ✅ 500MB+ image OK | ⚠️ Complex cold start | **Cloud Run** |
+| **Cold Start** | 2-5s (predictable) | 3-8s (variable) | **Cloud Run** |
+| **Cost (100 DAU)** | $0 (free tier) | $0 (free tier) | Tie |
+| **Scaling Control** | min/max instances (0-10) | Auto only | **Cloud Run** |
+| **Model Loading** | ✅ Startup event (once) | ⚠️ Per-instance init | **Cloud Run** |
+
+**Rationale:** 
+- TensorFlow 2.16.2 + model + dependencies = **~500MB Docker image**
+- Cloud Run allows **precise control** over container startup (load model once at startup)
+- **Predictable cold starts** (2-5s) vs Cloud Functions variable initialization (3-8s)
+- **Docker-based deployment** enables local testing with identical environment
+- **Scale-to-zero**: min-instances=0 (free) or min-instances=1 ($5/month, eliminates cold starts)
+
+**Production Configuration:**
+```yaml
+Region: europe-west1
+Memory: 1GB
+CPU: 1
+Min instances: 0 (scale-to-zero for cost optimization)
+Max instances: 10
+Timeout: 60s
+Concurrency: 80 requests/instance
+```
+
+---
+
+### 4. Frontend Hosting: Firebase Hosting vs Alternatives
+
+| Service | CDN | Build Integration | Cost (100 DAU) | Firebase SDK | Verdict |
+|---------|-----|------------------|----------------|--------------|---------||
+| **Firebase Hosting** ✅ | Global (GCP) | Manual (npm build) | Free (10GB) | ✅ Native | **CHOSEN** |
+| Netlify | Global (AWS) | Auto CI/CD | Free (100GB) | ❌ Third-party | Good alternative |
+| Vercel | Global (Vercel Edge) | Auto CI/CD | Free (100GB) | ❌ Third-party | Good alternative |
+| AWS Amplify | Global (CloudFront) | Auto CI/CD | ~$0.50/month | ❌ AWS SDK | More complex |
+
+**Verdict:** ✅ **Firebase Hosting** chosen for:
+1. **Zero-config integration** with Firebase Auth/Firestore (same SDK, same `*.web.app` domain)
+2. **Global CDN** included (no separate CloudFront setup)
+3. **Simple deployment**: `firebase deploy --only hosting`
+4. **Cache control** for static assets (31536000s = 1 year)
+5. **SPA routing** built-in (rewrites to index.html)
+
+**Production Build:**
+- Build size: 80.29 KB (main.js gzipped)
+- Build time: ~30 seconds
+- Cache headers: 1 year for .js/.css/.images
+
+---
+
+### 5. Model Deployment: FastAPI Startup Loading vs Alternatives
 
 | Approach | Latency (First Request) | Latency (Subsequent) | RAM Usage | Verdict |
 |----------|------------------------|----------------------|-----------|---------|
@@ -225,7 +283,7 @@ Dense(20, softmax)
     • Output: 20 probabilities (one per category)
 ```
 
-**Total Parameters:** 320 + 18,496 + 32,020 = **50,836** ≈ 35K (excluding biases)
+**Total Parameters:** 320 + 18,496 + 32,020 = **50,836** (≈50K including biases)
 
 ---
 
@@ -358,6 +416,14 @@ gs://ai-pictionary-bucket/
 - **raw/ vs processed/:** Audit trail + storage optimization (PNG vs .npy)
 - **Hierarchical versioning:** Easy rollback (copy `archived/v1.0.1/` → `current/`)
 - **Corrections isolation:** Active learning dataset separate from original
+
+**Production Note (v1.0.0):**
+Currently, the model is **embedded in the Docker image** (`/app/models/quickdraw_v1.0.0.h5`) rather than stored in Firebase Storage. This design choice:
+- ✅ **Optimizes cold starts:** Model loaded from local filesystem (2-5s) vs downloading from Storage (5-10s)
+- ✅ **Simplifies deployment:** Single Docker image contains code + model
+- ❌ **Trade-off:** Model updates require Docker rebuild + redeployment (~5 min)
+
+For v2.0.0 (Active Learning with frequent retraining), the Firebase Storage structure above will be implemented for **dynamic model versioning** without redeployment.
 
 ---
 
@@ -499,6 +565,7 @@ db.collection('games').doc(gameId).onSnapshot(snapshot => {
 
 ### 2. System Latency Breakdown
 
+#### Local Development (localhost:8000)
 | Component | Latency | Percentage |
 |-----------|---------|------------|
 | Network (Canvas → API) | 10-20ms | 25% |
@@ -507,24 +574,68 @@ db.collection('games').doc(gameId).onSnapshot(snapshot => {
 | Response Serialization | 1ms | 2% |
 | Network (API → Canvas) | 10-20ms | 25% |
 | Frontend Rendering | 15-20ms | 33% |
-| **Total** | **43-69ms** | **100%** |
+| **Total (Local)** | **43-69ms** | **100%** |
 
-**Target:** <100ms end-to-end latency ✅ **ACHIEVED**
+#### Production (Cloud Run - europe-west1)
+| Component | Latency | Notes |
+|-----------|---------|-------|
+| Network (Canvas → Cloud Run) | 50-150ms | EMEA: ~80ms, US: ~150ms |
+| Image Preprocessing | 2-3ms | Same as local |
+| **CNN Inference** | **8-12ms** | +3-7ms overhead (containerized) |
+| Response Serialization | 1ms | Same as local |
+| Network (Cloud Run → Canvas) | 50-150ms | Return latency |
+| Frontend Rendering | 15-20ms | Same as local |
+| **Total (Warm)** | **126-336ms** | Still < 500ms debounce ✅ |
+| **Total (Cold Start)** | **2000-5000ms** | After 15min inactivity |
+
+**Production Considerations:**
+- ✅ **Warm instances:** <350ms total latency (acceptable with 500ms debounce)
+- ⚠️ **Cold starts:** 2-5 seconds after scale-to-zero (15min timeout)
+- **Mitigation:** Set `min-instances=1` (+$5/month) to eliminate cold starts
+- **Target:** <500ms end-to-end latency ✅ **ACHIEVED (warm instances)**
 
 ---
 
 ### 3. Cost Analysis (100 Daily Active Users)
 
-| Service | Usage | Cost |
-|---------|-------|------|
-| Firestore Reads | 50K/month | $0.18 |
-| Firestore Writes | 10K/month | $0.18 |
-| Firebase Storage | 5 GB | $0.13 |
-| Cloud Functions (retraining) | 2 invocations/month | $0.01 |
-| Firebase Auth | 100 MAU | Free |
-| **Total** | | **$0.50/month** |
+#### Current Production Costs (v1.0.0)
 
-**Scalability:** Linear cost growth (100 DAU → 1000 DAU ≈ $5/month)
+| Service | Usage | Free Tier | Cost |
+|---------|-------|-----------|------|
+| **Cloud Run (Backend)** | ~30K requests/month | 2M requests | **$0** ✅ |
+|  ↳ CPU time | 90K vCPU-seconds | 180K vCPU-sec | **$0** ✅ |
+|  ↳ Memory | 180K GiB-seconds | 360K GiB-sec | **$0** ✅ |
+| **Firebase Hosting** | ~2 GB transfer | 10 GB/month | **$0** ✅ |
+| **Firestore Reads** | 50K/month | 50K/day | **$0** ✅ |
+| **Firestore Writes** | 10K/month | 20K/day | **$0** ✅ |
+| **Firebase Storage** | 5 GB stored | 5 GB | **$0** ✅ |
+|  ↳ Downloads | 1 GB/month | 1 GB/day | **$0** ✅ |
+| **Cloud Build** | 2 builds/month | 120 min/day | **$0** ✅ |
+| **Firebase Auth** | 100 MAU | Unlimited | **$0** ✅ |
+| **Total (100 DAU)** | | | **$0/month** ✅ |
+
+**Note:** With current usage (100 DAU), the entire application runs **within free tier limits**.
+
+#### Scaling Costs (Projections)
+
+| DAU | Monthly Requests | Cloud Run Cost | Firestore Cost | Hosting Cost | **Total** |
+|-----|-----------------|----------------|----------------|--------------|-----------||
+| 100 | 30K | $0 (free tier) | $0 (free tier) | $0 (free tier) | **$0** |
+| 500 | 150K | $0 (free tier) | $0.50 | $0 (free tier) | **$0.50** |
+| 1,000 | 300K | $0 (free tier) | $1.20 | $0.15 | **$1.35** |
+| 5,000 | 1.5M | $0 (free tier) | $6.00 | $0.80 | **$6.80** |
+| 10,000 | 3M | $0.50 (exceeds free) | $12.00 | $1.60 | **$14.10** |
+
+**Scalability:** Linear cost growth, primarily driven by Firestore read/write operations.
+
+#### Optional: Eliminate Cold Starts
+
+| Configuration | Cost Impact | Benefit |
+|--------------|-------------|---------||
+| `min-instances=0` (current) | **$0/month** | 2-5s cold starts after 15min |
+| `min-instances=1` | **+$5.40/month** | Zero cold starts, <100ms always |
+
+**Verdict:** Keep min-instances=0 for 100 DAU (cost optimization), switch to min-instances=1 for premium UX at scale.
 
 ---
 
@@ -569,15 +680,19 @@ if correction_count_last_hour(user_id) > 10:
 **Answer:**
 | Component | Limit | Bottleneck |
 |-----------|-------|------------|
-| Firestore | 10K writes/sec | ✅ No bottleneck (<100 DAU) |
-| FastAPI (single instance) | 1000 req/sec | ⚠️ Scale horizontally (Cloud Run) |
-| Firebase Storage | Unlimited | ✅ No bottleneck |
-| TensorFlow Inference | 200 req/sec (GPU) | ⚠️ Add GPU instances |
+| Firestore | 10K writes/sec | ✅ No bottleneck (<10K DAU) |
+| Cloud Run (single instance) | ~80 concurrent requests | ⚠️ Auto-scales to multiple instances |
+| Cloud Run (max scaling) | 10 instances (configured) | ⚠️ Can increase to 1000 if needed |
+| Firebase Hosting | Unlimited (CDN) | ✅ No bottleneck |
+| TensorFlow Inference (CPU) | 200 req/sec per instance | ⚠️ Horizontal scaling handles this |
 
 **Scaling Strategy:**
-- 100-1000 DAU: Single FastAPI instance
-- 1000-10K DAU: Horizontal scaling (Kubernetes + load balancer)
-- 10K+ DAU: GPU inference pool (TensorFlow Serving)
+- **100-1000 DAU:** 1-2 Cloud Run instances (autoscaling)
+- **1000-10K DAU:** 2-10 Cloud Run instances (current max-instances setting)
+- **10K-100K DAU:** Increase max-instances to 100, add Cloud CDN
+- **100K+ DAU:** Consider GPU instances (Cloud Run GPU support), TensorFlow Serving
+
+**No Kubernetes Required:** Cloud Run handles orchestration, load balancing, and autoscaling automatically.
 
 ---
 
@@ -630,6 +745,7 @@ This document provides comprehensive technical justifications for all architectu
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** January 2026  
-**Authors:** FISE3 Team
+**Document Version:** 1.1  
+**Last Updated:** December 5, 2025  
+**Authors:** FISE3 Team  
+**Production Deployment:** ✅ Live on Cloud Run + Firebase Hosting

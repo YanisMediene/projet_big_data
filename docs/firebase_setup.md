@@ -298,21 +298,322 @@ service firebase.storage {
 
 ---
 
-## Step 7: Generate Service Account Key (Backend)
+## Step 7: Google Cloud Run Deployment
 
-### 7.1 Navigate to Project Settings
+### 7.1 Why Cloud Run for Backend?
+
+**Cloud Run vs Cloud Functions:**
+
+| Aspect | Cloud Run ✅ | Cloud Functions |
+|--------|--------------|------------------|
+| Container Support | Custom Dockerfile | Buildpacks only |
+| Memory Limit | 32 GB | 16 GB |
+| TensorFlow Model | ✅ 500MB+ image OK | ⚠️ Complex setup |
+| Cold Start | 2-5s (predictable) | 3-8s (variable) |
+| Scaling Control | min/max instances | Auto only |
+| Cost (100 DAU) | $0 (free tier) | $0 (free tier) |
+
+**Verdict:** Cloud Run chosen for:
+- TensorFlow 2.16.2 + model = ~500MB Docker image
+- Precise control over container startup (load model once)
+- Predictable cold starts vs variable initialization
+- Docker-based deployment enables local testing
+
+### 7.2 Install Google Cloud SDK
+
+**macOS/Linux:**
+```bash
+# Download and install
+curl https://sdk.cloud.google.com | bash
+
+# Restart shell
+exec -l $SHELL
+
+# Verify installation
+gcloud --version
+```
+
+**Windows:**
+1. Download installer: https://cloud.google.com/sdk/docs/install
+2. Run GoogleCloudSDKInstaller.exe
+3. Follow installation wizard
+
+### 7.3 Authenticate and Configure
+
+```bash
+# Login to Google Cloud
+gcloud auth login
+
+# Set project ID (use your Firebase project ID)
+gcloud config set project ai-pictionary-4f8f2
+
+# Verify configuration
+gcloud config list
+```
+
+### 7.4 Enable Required APIs
+
+```bash
+gcloud services enable run.googleapis.com \
+  containerregistry.googleapis.com \
+  cloudbuild.googleapis.com
+```
+
+### 7.5 Create Environment Variables File
+
+Create `backend/env.yaml`:
+
+```yaml
+# Model configuration
+MODEL_VERSION: "v1.0.0"
+MODEL_PATH: "/app/models/quickdraw_v1.0.0.h5"
+
+# Categories (20 Quick Draw classes)
+CATEGORIES: "apple,sun,tree,house,car,cat,fish,star,umbrella,flower,moon,airplane,bicycle,clock,eye,cup,shoe,cloud,lightning,smiley_face"
+
+# CORS configuration (add your Firebase Hosting URLs)
+CORS_ORIGINS: "http://localhost:3000,https://ai-pictionary-4f8f2.web.app,https://ai-pictionary-4f8f2.firebaseapp.com"
+
+# Firebase credentials path (inside container)
+FIREBASE_CREDENTIALS_PATH: "./serviceAccountKey.json"
+```
+
+**Important Notes:**
+- Use **quoted strings** for all values
+- **Comma-separated** lists (no spaces after commas)
+- **No arrays** in env.yaml (gcloud limitation)
+
+### 7.6 Create Dockerfile
+
+Create `backend/Dockerfile`:
+
+```dockerfile
+# Use Python 3.11 (compatible with TensorFlow 2.16.2)
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Environment variables for TensorFlow optimization
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    PORT=8080
+
+# Install system dependencies (required for TensorFlow)
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY main.py .
+COPY models/ ./models/
+COPY serviceAccountKey.json .
+
+# Expose port (Cloud Run uses PORT env variable)
+EXPOSE 8080
+
+# Start command
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT} --workers 1
+```
+
+### 7.7 Create .dockerignore
+
+Create `backend/.dockerignore`:
+
+```
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.env
+.env.local
+.git
+.gitignore
+README.md
+.DS_Store
+*.log
+*.sqlite
+```
+
+### 7.8 Deploy to Cloud Run
+
+```bash
+cd backend
+
+# Deploy with source-based deployment
+gcloud run deploy ai-pictionary-backend \
+  --source . \
+  --region europe-west1 \
+  --memory 1Gi \
+  --cpu 1 \
+  --min-instances 0 \
+  --max-instances 10 \
+  --timeout 60s \
+  --allow-unauthenticated \
+  --env-vars-file env.yaml
+```
+
+**Deployment Parameters Explained:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|----------|
+| `--source .` | Current directory | Automatic Docker build |
+| `--region europe-west1` | Belgium, Europe | Low latency for EU users |
+| `--memory 1Gi` | 1GB RAM | Sufficient for TensorFlow + model |
+| `--cpu 1` | 1 vCPU | Adequate for inference |
+| `--min-instances 0` | Scale-to-zero | Cost optimization ($0/month) |
+| `--max-instances 10` | Max 10 containers | Handle traffic spikes |
+| `--timeout 60s` | 60 seconds | Allow for cold starts |
+| `--allow-unauthenticated` | Public access | No auth required for API |
+| `--env-vars-file env.yaml` | Environment config | Pass variables to container |
+
+**Deployment Process:**
+1. Cloud Build creates Docker image (~5 min)
+2. Image pushed to Container Registry
+3. Cloud Run deploys container
+4. Service URL generated
+
+**Expected Output:**
+```
+Building using Dockerfile and deploying container to Cloud Run service...
+✅ Deploying new service... Done.
+✅ Creating Revision... Done.
+✅ Routing traffic... Done.
+
+Service URL: https://ai-pictionary-backend-1064461234232.europe-west1.run.app
+```
+
+### 7.9 Verify Deployment
+
+```bash
+# Health check
+curl https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health
+
+# Expected response:
+{
+  "status": "healthy",
+  "model_version": "v1.0.0",
+  "model_loaded": true,
+  "categories_count": 20
+}
+
+# Test prediction endpoint
+curl -X POST https://ai-pictionary-backend-1064461234232.europe-west1.run.app/predict \
+  -H "Content-Type: application/json" \
+  -d '{"image": "your_base64_image_here"}'
+```
+
+### 7.10 View Logs
+
+```bash
+# Stream logs in real-time
+gcloud logging tail "resource.type=cloud_run_revision" --format=json
+
+# View last 50 logs
+gcloud logging read "resource.type=cloud_run_revision" --limit 50
+
+# Filter by severity
+gcloud logging read "resource.type=cloud_run_revision AND severity>=ERROR" --limit 20
+```
+
+### 7.11 Update Frontend Configuration
+
+Update `frontend/.env.production` with Cloud Run URL:
+
+```bash
+# Firebase config (already set)
+REACT_APP_FIREBASE_API_KEY=AIzaSy...
+REACT_APP_FIREBASE_AUTH_DOMAIN=ai-pictionary-4f8f2.firebaseapp.com
+REACT_APP_FIREBASE_PROJECT_ID=ai-pictionary-4f8f2
+REACT_APP_FIREBASE_STORAGE_BUCKET=ai-pictionary-4f8f2.appspot.com
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID=123456789012
+REACT_APP_FIREBASE_APP_ID=1:123456789012:web:abcd...
+
+# Backend API (Cloud Run URL)
+REACT_APP_API_BASE_URL=https://ai-pictionary-backend-1064461234232.europe-west1.run.app
+```
+
+**Important:** Also update `frontend/.env.local` for local development:
+
+```bash
+REACT_APP_API_BASE_URL=https://ai-pictionary-backend-1064461234232.europe-west1.run.app
+```
+
+### 7.12 Redeploy Backend (Updates)
+
+When you update backend code:
+
+```bash
+cd backend
+
+# Redeploy (same command)
+gcloud run deploy ai-pictionary-backend \
+  --source . \
+  --region europe-west1 \
+  --memory 1Gi \
+  --cpu 1 \
+  --min-instances 0 \
+  --max-instances 10 \
+  --timeout 60s \
+  --allow-unauthenticated \
+  --env-vars-file env.yaml
+```
+
+**Cloud Build caches layers** → Subsequent deployments faster (~2 min)
+
+### 7.13 Cost Optimization
+
+**Free Tier Limits (per month):**
+- **CPU time:** 180,000 vCPU-seconds
+- **Memory:** 360,000 GiB-seconds
+- **Requests:** 2,000,000
+
+**Current Usage (100 DAU):**
+- CPU: ~90,000 vCPU-seconds (✅ within free tier)
+- Memory: ~180,000 GiB-seconds (✅ within free tier)
+- Requests: ~30,000 (✅ within free tier)
+
+**Cost:** $0/month ✅
+
+**Optional: Eliminate Cold Starts**
+
+Set `--min-instances 1` to keep one instance always warm:
+
+```bash
+gcloud run deploy ai-pictionary-backend \
+  --min-instances 1 \
+  # ... other params
+```
+
+**Cost:** +$5.40/month (1 instance × 24/7)
+
+---
+
+## Step 8: Generate Service Account Key (Backend)
+
+### 8.1 Navigate to Project Settings
 1. Click **gear icon** ⚙️ next to "Project Overview"
 2. Click **"Project settings"**
 
-### 7.2 Go to Service Accounts Tab
+### 8.2 Go to Service Accounts Tab
 1. Click **"Service accounts"** tab
 2. Click **"Generate new private key"**
 
-### 7.3 Download JSON File
+### 8.3 Download JSON File
 1. Click **"Generate key"**
 2. Save file as: `serviceAccountKey.json`
 
-### 7.4 Add to Backend
+### 8.4 Add to Backend
 ```bash
 # Move to backend directory
 mv ~/Downloads/serviceAccountKey.json backend/
@@ -321,7 +622,7 @@ mv ~/Downloads/serviceAccountKey.json backend/
 # Already in .gitignore: *serviceAccountKey*.json
 ```
 
-### 7.5 Update Backend .env
+### 8.5 Update Backend .env
 ```bash
 # backend/.env
 FIREBASE_CREDENTIALS_PATH=./serviceAccountKey.json
@@ -329,16 +630,16 @@ FIREBASE_CREDENTIALS_PATH=./serviceAccountKey.json
 
 ---
 
-## Step 8: Get Firebase Config (Frontend)
+## Step 9: Get Firebase Config (Frontend)
 
-### 8.1 Add Web App
+### 9.1 Add Web App
 1. In Project Settings, click **"Add app"**
 2. Select **Web** (</> icon)
 3. App nickname: `ai-pictionary-web`
 4. ✅ **Enable Firebase Hosting** (optional)
 5. Click **"Register app"**
 
-### 8.2 Copy Firebase Config
+### 9.2 Copy Firebase Config
 
 You'll see config object like:
 ```javascript
@@ -353,7 +654,7 @@ const firebaseConfig = {
 ```
 
 
-### 8.3 Add to Frontend
+### 9.3 Add to Frontend
 
 Create `frontend/.env.local`:
 ```bash
@@ -367,7 +668,7 @@ REACT_APP_FIREBASE_APP_ID=1:123456789012:web:abcdef1234567890
 
 ---
 
-## Step 9: Install Firebase SDK
+## Step 10: Install Firebase SDK
 
 ### Backend (Python)
 ```bash
@@ -383,7 +684,7 @@ npm install firebase@10.8.0
 
 ---
 
-## Step 10: Initialize Firebase in Code
+## Step 11: Initialize Firebase in Code
 
 ### Backend Initialization
 
@@ -426,14 +727,14 @@ export const storage = getStorage(app);
 
 ---
 
-## Step 11: Create Firestore Indexes
+## Step 12: Create Firestore Indexes
 
 For efficient queries, create composite indexes:
 
-### 11.1 Navigate to Indexes
+### 12.1 Navigate to Indexes
 Click **"Indexes"** tab in Firestore
 
-### 11.2 Create Composite Indexes
+### 12.2 Create Composite Indexes
 
 **Index 1: Corrections by model version and timestamp**
 - Collection: `corrections`
@@ -453,13 +754,13 @@ Click **"Indexes"** tab in Firestore
   - `status` (Ascending)
   - `startTime` (Descending)
 
-### 11.3 Auto-Create from Errors
+### 12.3 Auto-Create from Errors
 
 Firebase will suggest indexes when queries fail. Accept suggestions in console.
 
 ---
 
-## Step 12: Testing Firebase Connection
+## Step 13: Testing Firebase Connection
 
 ### Test Backend
 
@@ -532,8 +833,10 @@ console.log('Current user:', user);  // Should not be null
 2. ✅ Authentication enabled (Google + Email)
 3. ✅ Firestore database initialized with security rules
 4. ✅ Storage bucket created with folder structure
-5. ⏳ Integrate Firebase Auth in React frontend
-6. ⏳ Implement Firestore CRUD operations
-7. ⏳ Test multiplayer real-time sync
+5. ✅ **Cloud Run backend deployed**
+6. ✅ **Frontend configured with Cloud Run URL**
+7. ⏳ Integrate Firebase Auth in React frontend
+8. ⏳ Implement Firestore CRUD operations
+9. ⏳ Test multiplayer real-time sync
 
-**Estimated Time:** 30-45 minutes
+**Estimated Time:** 60-90 minutes (including Cloud Run deployment)
