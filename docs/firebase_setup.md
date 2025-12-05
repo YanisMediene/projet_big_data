@@ -352,6 +352,7 @@ const firebaseConfig = {
 };
 ```
 
+
 ### 8.3 Add to Frontend
 
 Create `frontend/.env.local`:

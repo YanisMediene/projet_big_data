@@ -4,7 +4,7 @@ uvicorn[standard]==0.27.1
 python-multipart==0.0.9
 
 # Machine Learning
-tensorflow==2.15.0
+tensorflow==2.16.2
 numpy==1.26.4
 pillow==10.2.0
 
