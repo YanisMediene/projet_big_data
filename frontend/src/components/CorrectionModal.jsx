@@ -61,7 +61,7 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
               <p className="mt-2 text-sm text-gray-600">
                 The AI predicted: <strong className="text-gray-900 capitalize">
                   {predictions[0]?.category.replace('_', ' ')}
-                </strong> ({predictions[0]?.confidence.toFixed(1)}% confidence)
+                </strong> ({(predictions[0]?.confidence * 100).toFixed(1)}% confidence)
               </p>
               <p className="mt-1 text-sm text-gray-600">
                 What did you actually draw?

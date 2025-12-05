@@ -27,7 +27,10 @@ app = FastAPI(
 )
 
 # CORS Configuration
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,https://ai-pictionary-4f8f2.web.app,https://ai-pictionary-4f8f2.firebaseapp.com",
+).split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -89,7 +92,10 @@ async def load_model():
     """Load TensorFlow model at server startup to avoid cold start latency"""
     global model
 
-    model_path = os.getenv("MODEL_PATH", "./models/quickdraw_v1.0.0.h5")
+    model_path = os.getenv("MODEL_PATH", "/app/models/quickdraw_v1.0.0.h5")
+    # Fallback to local path for development
+    if not os.path.exists(model_path):
+        model_path = "./models/quickdraw_v1.0.0.h5"
 
     try:
         if os.path.exists(model_path):
@@ -138,6 +144,11 @@ def preprocess_canvas_image(base64_image: str) -> np.ndarray:
 
         # Convert to numpy array
         img_array = np.array(image, dtype=np.float32)
+
+        # CRITICAL FIX: Invert colors (Canvas: white bg, black strokes → Dataset: black bg, white strokes)
+        # Quick Draw dataset: background=0 (black), drawing=255 (white)
+        # Canvas: background=255 (white), drawing=0 (black)
+        img_array = 255.0 - img_array
 
         # Apply centroid cropping (center of mass alignment)
         img_array = apply_centroid_crop(img_array)

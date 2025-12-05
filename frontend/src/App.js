@@ -52,16 +52,21 @@ function App() {
       const result = await predictDrawing(base64Image);
       
       // Transform backend response to predictions array
-      const predictionsArray = result.predictions.map((pred) => ({
-        category: pred.category,
-        confidence: pred.confidence,
-      }));
+      // Backend returns: { prediction, confidence, probabilities: {cat1: 0.9, cat2: 0.05, ...}, model_version }
+      const predictionsArray = Object.entries(result.probabilities)
+        .slice(0, 3) // Top 3 only
+        .map(([category, confidence]) => ({
+          category,
+          confidence,
+        }));
 
       setPredictions(predictionsArray);
 
-      // Show correction modal if confidence < 85%
-      if (predictionsArray[0].confidence < 85) {
+      // Show correction modal if top prediction confidence < 85%
+      if (predictionsArray[0].confidence < 0.85) {
         setShowCorrectionModal(true);
+      } else {
+        setShowCorrectionModal(false);
       }
     } catch (error) {
       console.error('Prediction error:', error);

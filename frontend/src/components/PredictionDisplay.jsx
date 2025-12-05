@@ -36,9 +36,10 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
   }
 
   const getConfidenceColor = (confidence) => {
-    if (confidence >= 85) {
+    const percent = confidence * 100;
+    if (percent >= 85) {
       return 'bg-green-500'; // High confidence
-    } else if (confidence >= 70) {
+    } else if (percent >= 70) {
       return 'bg-yellow-500'; // Medium confidence
     } else {
       return 'bg-red-500'; // Low confidence
@@ -46,9 +47,10 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
   };
 
   const getConfidenceTextColor = (confidence) => {
-    if (confidence >= 85) {
+    const percent = confidence * 100;
+    if (percent >= 85) {
       return 'text-green-700';
-    } else if (confidence >= 70) {
+    } else if (percent >= 70) {
       return 'text-yellow-700';
     } else {
       return 'text-red-700';
@@ -56,9 +58,10 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
   };
 
   const getConfidenceLabel = (confidence) => {
-    if (confidence >= 85) {
+    const percent = confidence * 100;
+    if (percent >= 85) {
       return '✓ High';
-    } else if (confidence >= 70) {
+    } else if (percent >= 70) {
       return '⚠ Medium';
     } else {
       return '✗ Low';
@@ -86,7 +89,7 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
                   {getConfidenceLabel(prediction.confidence)}
                 </span>
                 <span className="text-lg font-bold text-gray-900">
-                  {prediction.confidence.toFixed(1)}%
+                  {(prediction.confidence * 100).toFixed(1)}%
                 </span>
               </div>
             </div>
@@ -95,7 +98,7 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
             <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
               <div
                 className={`h-full ${getConfidenceColor(prediction.confidence)} transition-all duration-500 ease-out rounded-full`}
-                style={{ width: `${prediction.confidence}%` }}
+                style={{ width: `${prediction.confidence * 100}%` }}
               />
             </div>
           </div>
@@ -103,7 +106,7 @@ const PredictionDisplay = ({ predictions, isLoading }) => {
       </div>
 
       {/* Low confidence warning */}
-      {predictions[0] && predictions[0].confidence < 85 && (
+      {predictions[0] && predictions[0].confidence * 100 < 85 && (
         <div className="mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
           <div className="flex items-start">
             <div className="flex-shrink-0">

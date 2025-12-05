@@ -37,7 +37,7 @@ export const predictDrawing = (base64Image) => {
     debounceTimer = setTimeout(async () => {
       try {
         const response = await apiClient.post('/predict', {
-          image: base64Image,
+          image_data: base64Image,
         });
         resolve(response.data);
       } catch (error) {
