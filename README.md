@@ -2,6 +2,8 @@
 
 **FISE3 Big Data Project** | Cloud-Native ML Drawing Game with Active Learning
 
+> **🚀 [QUICKSTART GUIDE](QUICKSTART.md)** - Lancez l'app en 5 minutes !
+
 ---
 
 ## 📋 Project Overview
