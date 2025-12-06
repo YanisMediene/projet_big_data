@@ -258,3 +258,28 @@ class FirestoreService:
             data["id"] = doc.id
             return data
         return None
+
+    @staticmethod
+    def get_games_by_status(status: str, game_type: Optional[str] = None) -> List[Dict]:
+        """
+        Get games by status and optionally by game type
+
+        Args:
+            status: Game status (waiting, playing, finished)
+            game_type: Optional game type filter (race, guessing)
+
+        Returns:
+            List of games
+        """
+        query = db.collection("games").where("status", "==", status)
+        
+        if game_type:
+            query = query.where("game_type", "==", game_type)
+        
+        games = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            data["id"] = doc.id
+            games.append(data)
+        
+        return games

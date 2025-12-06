@@ -15,6 +15,8 @@ import os
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, auth
+from middleware.rate_limit import RateLimitMiddleware
+from routers import admin, games
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +40,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate Limiting Middleware
+app.add_middleware(RateLimitMiddleware)
+
+# Include routers
+app.include_router(admin.router)
+app.include_router(games.router)
 
 # Global variables
 model = None
