@@ -272,14 +272,14 @@ class FirestoreService:
             List of games
         """
         query = db.collection("games").where("status", "==", status)
-        
+
         if game_type:
             query = query.where("game_type", "==", game_type)
-        
+
         games = []
         for doc in query.stream():
             data = doc.to_dict()
             data["id"] = doc.id
             games.append(data)
-        
+
         return games
