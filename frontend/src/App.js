@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import DrawingCanvas from './components/DrawingCanvas';
 import PredictionDisplay from './components/PredictionDisplay';
 import CorrectionModal from './components/CorrectionModal';
+import LoginModal from './components/Auth/LoginModal';
+import SignUpForm from './components/Auth/SignUpForm';
+import UserProfile from './components/Auth/UserProfile';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { predictDrawing, checkHealth } from './services/api';
 import './App.css';
 
@@ -13,13 +17,16 @@ const CATEGORIES = [
   'cup', 'shoe', 'cloud', 'lightning', 'smiley_face'
 ];
 
-function App() {
+function AppContent() {
+  const { currentUser } = useAuth();
   const [predictions, setPredictions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [canvasImage, setCanvasImage] = useState(null);
   const [showCorrectionModal, setShowCorrectionModal] = useState(false);
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSignUpModal, setShowSignUpModal] = useState(false);
 
   // Check backend health on mount
   useEffect(() => {
@@ -98,17 +105,39 @@ function App() {
                 Draw something and let AI guess what it is!
               </p>
             </div>
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">Backend:</span>
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                backendStatus === 'online' 
-                  ? 'bg-green-100 text-green-800' 
-                  : backendStatus === 'offline'
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-yellow-100 text-yellow-800'
-              }`}>
-                {backendStatus === 'online' ? '✓ Online' : backendStatus === 'offline' ? '✗ Offline' : '⟳ Checking...'}
-              </span>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">Backend:</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                  backendStatus === 'online' 
+                    ? 'bg-green-100 text-green-800' 
+                    : backendStatus === 'offline'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {backendStatus === 'online' ? '✓ Online' : backendStatus === 'offline' ? '✗ Offline' : '⟳ Checking...'}
+                </span>
+              </div>
+              
+              {/* Auth Buttons */}
+              {!currentUser ? (
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Se connecter
+                  </button>
+                  <button
+                    onClick={() => setShowSignUpModal(true)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
+                  >
+                    S'inscrire
+                  </button>
+                </div>
+              ) : (
+                <UserProfile />
+              )}
             </div>
           </div>
         </div>
@@ -190,6 +219,24 @@ function App() {
         categories={CATEGORIES}
       />
 
+      {/* Auth Modals */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSwitchToSignup={() => {
+          setShowLoginModal(false);
+          setShowSignUpModal(true);
+        }}
+      />
+      <SignUpForm
+        isOpen={showSignUpModal}
+        onClose={() => setShowSignUpModal(false)}
+        onSwitchToLogin={() => {
+          setShowSignUpModal(false);
+          setShowLoginModal(true);
+        }}
+      />
+
       {/* Footer */}
       <footer className="mt-12 bg-white border-t border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -199,6 +246,14 @@ function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

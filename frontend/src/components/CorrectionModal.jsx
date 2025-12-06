@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadString } from 'firebase/storage';
+import { db, storage, auth } from '../firebase';
 
 /**
  * CorrectionModal Component
@@ -18,33 +21,51 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
 
   const handleSubmitCorrection = async () => {
     if (!selectedCategory) {
-      alert('Please select the correct category');
+      alert('Veuillez sélectionner la catégorie correcte');
+      return;
+    }
+
+    // Check if user is authenticated
+    if (!auth.currentUser) {
+      alert('Vous devez être connecté pour soumettre une correction');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // TODO: Implement Firestore submission
-      // 1. Upload image to Firebase Storage: /drawings/raw/{sessionId}/{timestamp}.png
-      // 2. Add correction document to Firestore: corrections/{correctionId}
-      // 3. Trigger retraining if corrections >= 500
+      // 1. Generate unique drawing ID
+      const drawingId = `${Date.now()}_${auth.currentUser.uid}`;
+      
+      // 2. Upload image to Firebase Storage
+      const storageRef = ref(storage, `drawings/corrections/${drawingId}.png`);
+      await uploadString(storageRef, canvasImage, 'data_url');
+      
+      // 3. Add correction document to Firestore
+      await addDoc(collection(db, 'corrections'), {
+        drawingId,
+        originalPrediction: predictions[0]?.category || 'unknown',
+        correctedLabel: selectedCategory,
+        confidence: predictions[0]?.confidence || 0,
+        userId: auth.currentUser.uid,
+        timestamp: serverTimestamp(),
+        modelVersion: 'v1.0.0',
+        imageStoragePath: `drawings/corrections/${drawingId}.png`
+      });
 
-      console.log('Correction submitted:', {
+      console.log('✓ Correction saved successfully:', {
+        drawingId,
         originalPrediction: predictions[0]?.category,
         correctedLabel: selectedCategory,
         confidence: predictions[0]?.confidence,
-        imageData: canvasImage,
       });
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      alert(`✓ Thank you! Correction saved: ${selectedCategory.replace('_', ' ')}`);
+      alert(`✓ Merci ! Correction enregistrée : ${selectedCategory.replace('_', ' ')}`);
+      setSelectedCategory('');
       onClose();
     } catch (error) {
       console.error('Error submitting correction:', error);
-      alert('Error submitting correction. Please try again.');
+      alert('Erreur lors de la soumission de la correction. Veuillez réessayer.');
     } finally {
       setIsSubmitting(false);
     }
@@ -57,14 +78,14 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
         <div className="p-6 border-b border-gray-200">
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Help Improve the Model</h2>
+              <h2 className="text-2xl font-bold text-gray-900">Aidez à améliorer le modèle</h2>
               <p className="mt-2 text-sm text-gray-600">
-                The AI predicted: <strong className="text-gray-900 capitalize">
+                L'IA a prédit : <strong className="text-gray-900 capitalize">
                   {predictions[0]?.category.replace('_', ' ')}
-                </strong> ({(predictions[0]?.confidence * 100).toFixed(1)}% confidence)
+                </strong> ({(predictions[0]?.confidence * 100).toFixed(1)}% de confiance)
               </p>
               <p className="mt-1 text-sm text-gray-600">
-                What did you actually draw?
+                Qu'avez-vous réellement dessiné ?
               </p>
             </div>
             <button
@@ -102,7 +123,7 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
         {/* Footer */}
         <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
           <p className="text-xs text-gray-500">
-            Your correction will help retrain the model
+            Votre correction aidera à réentraîner le modèle
           </p>
           <div className="flex space-x-3">
             <button
@@ -110,7 +131,7 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
               className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               disabled={isSubmitting}
             >
-              Cancel
+              Annuler
             </button>
             <button
               onClick={handleSubmitCorrection}
@@ -120,10 +141,10 @@ const CorrectionModal = ({ isOpen, onClose, predictions, canvasImage, categories
               {isSubmitting ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Submitting...</span>
+                  <span>Envoi...</span>
                 </>
               ) : (
-                <span>Submit Correction</span>
+                <span>Soumettre la correction</span>
               )}
             </button>
           </div>
