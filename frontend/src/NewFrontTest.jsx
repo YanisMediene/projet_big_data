@@ -682,6 +682,50 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
     };
   };
 
+  // Fonction pour appliquer une dilatation morphologique (épaississement des traits)
+  const dilateImage = (ctx, width, height, iterations = 1) => {
+    for (let iter = 0; iter < iterations; iter++) {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const data = imageData.data;
+      const output = new Uint8ClampedArray(data);
+
+      // Kernel de dilatation 3x3
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const idx = (y * width + x) * 4;
+          
+          // Si le pixel actuel est noir, on passe
+          if (data[idx] < 128) {
+            output[idx] = data[idx];
+            output[idx + 1] = data[idx + 1];
+            output[idx + 2] = data[idx + 2];
+            continue;
+          }
+
+          // Vérifier les 8 voisins
+          let minValue = 255;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nIdx = ((y + dy) * width + (x + dx)) * 4;
+              minValue = Math.min(minValue, data[nIdx]);
+            }
+          }
+
+          // Appliquer la valeur minimale (dilate les zones noires)
+          output[idx] = minValue;
+          output[idx + 1] = minValue;
+          output[idx + 2] = minValue;
+        }
+      }
+
+      // Remettre les données
+      for (let i = 0; i < data.length; i++) {
+        data[i] = output[i];
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+  };
+
   // Fonction pour créer l'image 128x128 carrée à envoyer au modèle
   const createModelImage = () => {
     const canvas = canvasRef.current;
@@ -689,35 +733,62 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
 
     if (!bbox) return null;
 
-    // Créer un canvas temporaire carré 128x128
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = 128;
-    tempCanvas.height = 128;
-    const tempCtx = tempCanvas.getContext('2d');
+    // Calculer le facteur de réduction
+    const maxDimension = Math.max(bbox.width, bbox.height);
+    const targetSize = 128;
+    const scaleFactor = maxDimension / targetSize;
+
+    // Étape 1: Créer un canvas intermédiaire à résolution plus élevée
+    const intermediateSize = Math.max(targetSize * 2, 256);
+    const intermediateCanvas = document.createElement('canvas');
+    intermediateCanvas.width = intermediateSize;
+    intermediateCanvas.height = intermediateSize;
+    const intermediateCtx = intermediateCanvas.getContext('2d');
 
     // Fond blanc
-    tempCtx.fillStyle = '#FFFFFF';
-    tempCtx.fillRect(0, 0, 128, 128);
+    intermediateCtx.fillStyle = '#FFFFFF';
+    intermediateCtx.fillRect(0, 0, intermediateSize, intermediateSize);
 
     // Le dessin remplit tout l'espace disponible (95% pour petite marge)
-    const scale = Math.min(128 / bbox.width, 128 / bbox.height) * 0.95;
+    const scale = Math.min(intermediateSize / bbox.width, intermediateSize / bbox.height) * 0.95;
     const scaledWidth = bbox.width * scale;
     const scaledHeight = bbox.height * scale;
 
     // Centrer le dessin
-    const offsetX = (128 - scaledWidth) / 2;
-    const offsetY = (128 - scaledHeight) / 2;
+    const offsetX = (intermediateSize - scaledWidth) / 2;
+    const offsetY = (intermediateSize - scaledHeight) / 2;
 
-    // Qualité de redimensionnement
-    tempCtx.imageSmoothingEnabled = true;
-    tempCtx.imageSmoothingQuality = 'high';
+    // Qualité de redimensionnement maximale
+    intermediateCtx.imageSmoothingEnabled = true;
+    intermediateCtx.imageSmoothingQuality = 'high';
 
-    // Dessiner la zone croppée et redimensionnée
-    tempCtx.drawImage(
+    // Dessiner la zone croppée et redimensionnée sur le canvas intermédiaire
+    intermediateCtx.drawImage(
       canvas,
       bbox.x, bbox.y, bbox.width, bbox.height,
       offsetX, offsetY, scaledWidth, scaledHeight
     );
+
+    // Étape 2: Appliquer une dilatation si le facteur de réduction est élevé
+    if (scaleFactor > 2) {
+      const dilationIterations = Math.min(Math.floor(scaleFactor / 2), 3);
+      dilateImage(intermediateCtx, intermediateSize, intermediateSize, dilationIterations);
+    }
+
+    // Étape 3: Créer le canvas final 128x128
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = targetSize;
+    tempCanvas.height = targetSize;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    // Fond blanc
+    tempCtx.fillStyle = '#FFFFFF';
+    tempCtx.fillRect(0, 0, targetSize, targetSize);
+
+    // Redimensionner du canvas intermédiaire vers le canvas final
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+    tempCtx.drawImage(intermediateCanvas, 0, 0, targetSize, targetSize);
 
     return tempCanvas.toDataURL('image/png');
   };
