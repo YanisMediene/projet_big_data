@@ -18,6 +18,13 @@ var/
 wheels/
 *.egg-info/
 .installed.cfg
+
+# Secrets & API Keys
+.secrets.local
+.secrets
+*.key
+*.pem
+serviceAccountKey.json
 *.egg
 MANIFEST
 
