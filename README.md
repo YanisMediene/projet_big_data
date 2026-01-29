@@ -3,11 +3,26 @@
 **FISE3 Big Data Project** | Cloud-Native ML Drawing Game with Active Learning
 
 > **🚀 PRODUCTION APP:** [https://ai-pictionary-4f8f2.web.app](https://ai-pictionary-4f8f2.web.app)  
-> **📚 [QUICKSTART GUIDE](QUICKSTART.md)** - Guide développement local et production
+> **📚 [QUICKSTART GUIDE](docs/QUICKSTART.md)** - Guide développement local  
+> **🔧 [DEVELOPMENT WORKFLOW](docs/DEVELOPMENT_WORKFLOW.md)** - Guide dev local & déploiement
 
 [![Deployment](https://img.shields.io/badge/deployment-live-brightgreen)](https://ai-pictionary-4f8f2.web.app)
 [![Backend](https://img.shields.io/badge/backend-Cloud%20Run-blue)](https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health)
 [![Frontend](https://img.shields.io/badge/frontend-Firebase%20Hosting-orange)](https://ai-pictionary-4f8f2.web.app)
+
+---
+
+## ⚡ Quick Start
+
+```bash
+# Développement local
+cd frontend && npm start
+
+# Déploiement production (méthode recommandée)
+./deploy.sh all
+
+# Voir docs/DEVELOPMENT_WORKFLOW.md pour plus de détails
+```
 
 ---
 

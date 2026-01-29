@@ -19,8 +19,11 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:prod": "mv .env.local .env.local.bak 2>/dev/null || true && npm run build && mv .env.local.bak .env.local 2>/dev/null || true",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "deploy": "npm run build:prod && cd .. && firebase deploy --only hosting",
+    "deploy:full": "npm run build:prod && cd .. && firebase deploy"
   },
   "eslintConfig": {
     "extends": [
