@@ -3,8 +3,9 @@
 **FISE3 Big Data Project** | Cloud-Native ML Drawing Game with Active Learning
 
 > **🚀 PRODUCTION APP:** [https://ai-pictionary-4f8f2.web.app](https://ai-pictionary-4f8f2.web.app)  
-> **📚 [QUICKSTART GUIDE](docs/QUICKSTART.md)** - Guide développement local  
-> **🔧 [DEVELOPMENT WORKFLOW](docs/DEVELOPMENT_WORKFLOW.md)** - Guide dev local & déploiement
+> **📚 [GETTING_STARTED](docs/GETTING_STARTED.md)** - Guide démarrage rapide (0-70min)  
+> **🏗️ [INFRASTRUCTURE](docs/INFRASTRUCTURE.md)** - Configuration Firebase & Cloud Run  
+> **💻 [DEVELOPMENT](docs/DEVELOPMENT.md)** - Workflow développement
 
 [![Deployment](https://img.shields.io/badge/deployment-live-brightgreen)](https://ai-pictionary-4f8f2.web.app)
 [![Backend](https://img.shields.io/badge/backend-Cloud%20Run-blue)](https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health)
@@ -15,13 +16,17 @@
 ## ⚡ Quick Start
 
 ```bash
-# Développement local
+# Démarrage rapide - Production (0 min)
+# App déjà déployée : https://ai-pictionary-4f8f2.web.app
+
+# Développement local (70 min)
 cd frontend && npm start
 
-# Déploiement production (méthode recommandée)
+# Déploiement production (avec scripts automatisés)
 ./deploy.sh all
 
-# Voir docs/DEVELOPMENT_WORKFLOW.md pour plus de détails
+# 📚 Voir docs/GETTING_STARTED.md pour guide complet
+# 💻 Voir docs/DEVELOPMENT.md pour workflow détaillé
 ```
 
 ---
@@ -524,10 +529,47 @@ curl https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health
 
 ## 📚 Documentation
 
-- **[Defense Justifications](docs/defense_justifications.md)** - Technical decisions for jury Q&A
-- **[Data Pipeline](docs/data_pipeline.md)** - Dataset preprocessing steps
-- **[API Contracts](docs/api_contracts.md)** - Backend endpoint specifications
-- **[Deployment Guide](docs/deployment.md)** - Production deployment instructions
+### 🚀 Guide Principal
+- **[GETTING_STARTED.md](docs/GETTING_STARTED.md)** — Guide démarrage rapide (0-70min)
+  - Production (0min) : App déployée
+  - Dev local (70min) : Setup complet
+  - Phase 2 (15min) : Quick setup
+
+### 🏗️ Infrastructure & Déploiement
+- **[INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md)** — Configuration Firebase & Cloud Run
+  - Firebase setup (Auth, Firestore, Storage)
+  - Cloud Run deployment
+  - Cloud Scheduler automation
+  - Monitoring & logs
+
+### 💻 Développement
+- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** — Workflow développement
+  - Configuration environnement
+  - Workflow quotidien
+  - Tests & validation
+  - Déploiement
+
+### 📊 État du Projet
+- **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — État d'avancement complet
+  - Phase 1 & 2 (100%)
+  - Métriques projet
+  - Prochaines étapes
+
+### 🎓 Référence Technique
+- **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — Pour la défense
+  - Décisions architecture
+  - Pipeline ML détaillé
+  - Optimisations production
+  - Q&A défense préparée
+
+### 🔒 Sécurité
+- **[SECURITY_REMEDIATION.md](docs/SECURITY_REMEDIATION.md)** — Procédures sécurité
+  - Rotation clés API
+  - Git history cleanup
+  - Incident response
+
+### 📦 Archive
+- **[docs/archive/](docs/archive/)** — Anciens fichiers de documentation consolidés
 
 ---
 
