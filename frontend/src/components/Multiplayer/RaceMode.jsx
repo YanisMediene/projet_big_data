@@ -17,8 +17,10 @@ function RaceMode() {
   const [prediction, setPrediction] = useState(null);
   const [canvasImage, setCanvasImage] = useState(null);
   const [gameStatus, setGameStatus] = useState('waiting'); // waiting, playing, finished
+  const [roundNotification, setRoundNotification] = useState(null);
   
   const canvasRef = useRef(null);
+  const previousRoundRef = useRef(null);
 
   // Listen to game updates in real-time
   useEffect(() => {
@@ -30,6 +32,27 @@ function RaceMode() {
         const gameData = { id: doc.id, ...doc.data() };
         setGame(gameData);
         setGameStatus(gameData.status);
+        
+        // Detect round change
+        if (previousRoundRef.current !== null && 
+            gameData.current_round !== previousRoundRef.current && 
+            gameData.status === 'playing') {
+          // Clear canvas
+          if (canvasRef.current) {
+            canvasRef.current.clearCanvas();
+          }
+          
+          // Show round notification
+          const lastWinner = gameData.round_winners?.[gameData.round_winners.length - 1];
+          const message = lastWinner 
+            ? `Round ${previousRoundRef.current} gagné par ${lastWinner.winner_name} !`
+            : `Round ${gameData.current_round} !`;
+          
+          setRoundNotification(message);
+          setTimeout(() => setRoundNotification(null), 3000);
+        }
+        
+        previousRoundRef.current = gameData.current_round;
         
         // Reset timer when round changes
         if (gameData.round_start_time) {
@@ -51,6 +74,7 @@ function RaceMode() {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
+          handleTimeout();
           return 0;
         }
         return prev - 1;
@@ -78,6 +102,18 @@ function RaceMode() {
     }
   };
 
+  const handleTimeout = async () => {
+    try {
+      await fetch(`${API_URL}/games/race/timeout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId }),
+      });
+    } catch (error) {
+      console.error('Error handling timeout:', error);
+    }
+  };
+
   const handlePrediction = async (predictionData) => {
     setPrediction(predictionData);
 
@@ -98,15 +134,8 @@ function RaceMode() {
         });
 
         const result = await response.json();
-        
+
         if (result.status === 'round_won' || result.status === 'game_finished') {
-          // Show winner animation
-          alert(`🎉 ${result.round_winner.player_name} a gagné ce round !`);
-          
-          if (result.status === 'game_finished') {
-            alert(`🏆 Champion: ${result.champion.player_name} avec ${result.champion.rounds_won} victoires !`);
-          }
-          
           // Clear canvas for next round
           if (canvasRef.current) {
             canvasRef.current.clearCanvas();
@@ -127,6 +156,13 @@ function RaceMode() {
 
   return (
     <div className="race-mode">
+      {/* Round notification */}
+      {roundNotification && (
+        <div className="round-notification">
+          {roundNotification}
+        </div>
+      )}
+      
       {/* Header with game info */}
       <div className="race-header">
         <div className="game-info">
@@ -145,6 +181,11 @@ function RaceMode() {
               <span className="prompt-label">Dessinez:</span>
               <span className="category">{game.current_category}</span>
             </div>
+            {game.round_winners && game.round_winners.length > 0 && (
+              <div className="last-winner">
+                🏆 Dernier gagnant: {game.round_winners[game.round_winners.length - 1].winner_name}
+              </div>
+            )}
           </div>
         )}
 

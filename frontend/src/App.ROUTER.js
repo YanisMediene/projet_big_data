@@ -10,8 +10,6 @@ import GameLobby from './components/Multiplayer/GameLobby';
 import RaceMode from './components/Multiplayer/RaceMode';
 import GuessingGame from './components/Multiplayer/GuessingGame';
 import Settings from './components/Settings/Settings';
-import NewFrontTest from './NewFrontTest';
-import TestCanva from './TestCanva';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { predictDrawing, checkHealth } from './services/api';
 import { useSettings } from './hooks/useSettings';
@@ -27,8 +25,8 @@ const CATEGORIES = [
 
 // Home Page Component (Drawing Interface)
 function HomePage() {
-  // const { currentUser } = useAuth(); // Unused for now
-  const { settings } = useSettings();
+  const { currentUser } = useAuth();
+  const { settings, loading: settingsLoading } = useSettings();
   const [predictions, setPredictions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -63,8 +61,8 @@ function HomePage() {
     setIsLoading(true);
 
     try {
-      // Note: predictionDebounce setting available but debouncing handled in api.js
-      // const debounce = settings?.predictionDebounce || 500;
+      // Use settings.predictionDebounce if available (default 500ms)
+      const debounce = settings?.predictionDebounce || 500;
       
       // Debounced prediction call
       const result = await predictDrawing(base64Image);
@@ -293,6 +291,7 @@ function AppLayout() {
             path="/settings" 
             element={currentUser ? <Settings /> : <Navigate to="/" replace />} 
           />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
 
@@ -330,13 +329,7 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <Routes>
-          {/* Route standalone plein écran pour NewFrontTest */}
-          <Route path="/" element={<NewFrontTest />} />
-          <Route path="/test_canva" element={<TestCanva />} />
-          <Route path="/old" element={<AppLayout />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppLayout />
       </Router>
     </AuthProvider>
   );

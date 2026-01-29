@@ -706,6 +706,44 @@
   display: flex;
   flex-direction: column;
   background: #f8f9fa;
+  position: relative;
+}
+
+.round-notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px 32px;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+  z-index: 1000;
+  animation: slideInDown 0.5s ease-out, fadeOut 0.5s ease-in 2.5s;
+  pointer-events: none;
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateX(-50%) translateY(-100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 .race-header {

@@ -40,7 +40,8 @@ function GameLobby() {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/games/race/create`, {
+      const endpoint = gameType === 'race' ? 'race' : 'guessing';
+      const response = await fetch(`${API_URL}/games/${endpoint}/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -59,7 +60,8 @@ function GameLobby() {
 
       const data = await response.json();
       // Redirect to game room
-      window.location.href = `/multiplayer/race/${data.game_id}`;
+      const roomPath = gameType === 'race' ? 'race' : 'guessing';
+      window.location.href = `/multiplayer/${roomPath}/${data.game_id}`;
     } catch (error) {
       console.error('Error creating game:', error);
       alert('Erreur lors de la création de la partie');
@@ -68,14 +70,15 @@ function GameLobby() {
     }
   };
 
-  const handleJoinGame = async (gameId) => {
+  const handleJoinGame = async (gameId, gameType) => {
     if (!currentUser) {
       alert('Vous devez être connecté pour rejoindre une partie');
       return;
     }
 
     try {
-      const response = await fetch(`${API_URL}/games/race/join`, {
+      const endpoint = gameType === 'race' ? 'race' : 'guessing';
+      const response = await fetch(`${API_URL}/games/${endpoint}/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -93,7 +96,8 @@ function GameLobby() {
       }
 
       // Redirect to game room
-      window.location.href = `/multiplayer/race/${gameId}`;
+      const roomPath = gameType === 'race' ? 'race' : 'guessing';
+      window.location.href = `/multiplayer/${roomPath}/${gameId}`;
     } catch (error) {
       console.error('Error joining game:', error);
       alert(error.message);
@@ -150,7 +154,7 @@ function GameLobby() {
                   </div>
                   <button
                     className="join-btn"
-                    onClick={() => handleJoinGame(lobby.id)}
+                    onClick={() => handleJoinGame(lobby.id, lobby.game_type)}
                     disabled={lobby.players.length >= lobby.max_players}
                   >
                     {lobby.players.length >= lobby.max_players
@@ -169,9 +173,47 @@ function GameLobby() {
             Travaillez en équipe pour faire deviner vos dessins à l'IA !
             Chat et collaboration en temps réel.
           </p>
-          <div className="coming-soon">
-            <p>🚧 Bientôt disponible</p>
-          </div>
+          
+          {lobbies.filter(l => l.game_type === 'guessing').length === 0 ? (
+            <div className="no-lobbies">
+              <p>Aucune partie disponible</p>
+              <p className="subtitle">Créez-en une !</p>
+            </div>
+          ) : (
+            <div className="lobbies-list">
+              {lobbies.filter(l => l.game_type === 'guessing').map((lobby) => (
+                <div key={lobby.id} className="lobby-card">
+                  <div className="lobby-info">
+                    <h3>Partie de {lobby.players[0]?.player_name}</h3>
+                    <div className="lobby-details">
+                      <span className="player-count">
+                        👥 {lobby.players.length}/{lobby.max_players} joueurs
+                      </span>
+                      <span className="round-count">
+                        🎯 {lobby.max_rounds} rounds
+                      </span>
+                    </div>
+                    <div className="players-preview">
+                      {lobby.players.map((p, i) => (
+                        <span key={i} className="player-badge">
+                          {p.player_name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    className="join-btn"
+                    onClick={() => handleJoinGame(lobby.id, lobby.game_type)}
+                    disabled={lobby.players.length >= lobby.max_players}
+                  >
+                    {lobby.players.length >= lobby.max_players
+                      ? '🔒 Pleine'
+                      : '🚀 Rejoindre'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -183,7 +225,7 @@ function GameLobby() {
               <label>Type de jeu:</label>
               <select value={gameType} onChange={(e) => setGameType(e.target.value)}>
                 <option value="race">🏁 Mode Course</option>
-                <option value="guessing" disabled>🤖 Humains vs IA (bientôt)</option>
+                <option value="guessing">🤖 Humains vs IA</option>
               </select>
             </div>
             <div className="form-group">

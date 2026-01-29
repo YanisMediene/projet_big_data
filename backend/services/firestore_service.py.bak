@@ -34,7 +34,7 @@ class FirestoreService:
         Returns:
             Document ID of the created correction
         """
-        doc_ref = get_db().collection("corrections").document()
+        doc_ref = db.collection("corrections").document()
         doc_ref.set({**correction_data, "createdAt": firestore.SERVER_TIMESTAMP})
         return doc_ref.id
 
@@ -53,8 +53,7 @@ class FirestoreService:
             List of correction documents
         """
         query = (
-            get_db()
-            .collection("corrections")
+            db.collection("corrections")
             .where("modelVersion", "==", model_version)
             .limit(min_count)
             .stream()
@@ -80,8 +79,7 @@ class FirestoreService:
             Number of corrections
         """
         query = (
-            get_db()
-            .collection("corrections")
+            db.collection("corrections")
             .where("modelVersion", "==", model_version)
             .stream()
         )
@@ -97,7 +95,7 @@ class FirestoreService:
             user_id: Firebase Auth UID
             user_data: User profile data
         """
-        doc_ref = get_db().collection("users").document(user_id)
+        doc_ref = db.collection("users").document(user_id)
         doc_ref.set(user_data, merge=True)
 
     @staticmethod
@@ -111,7 +109,7 @@ class FirestoreService:
         Returns:
             User profile data or None
         """
-        doc_ref = get_db().collection("users").document(user_id)
+        doc_ref = db.collection("users").document(user_id)
         doc = doc_ref.get()
 
         if doc.exists:
@@ -127,7 +125,7 @@ class FirestoreService:
             user_id: Firebase Auth UID
             stats_update: Statistics to update
         """
-        doc_ref = get_db().collection("users").document(user_id)
+        doc_ref = db.collection("users").document(user_id)
         doc_ref.update(
             {f"statistics.{key}": value for key, value in stats_update.items()}
         )
@@ -143,7 +141,7 @@ class FirestoreService:
         Returns:
             Document ID of the created session
         """
-        doc_ref = get_db().collection("sessions").document()
+        doc_ref = db.collection("sessions").document()
         doc_ref.set(
             {
                 **session_data,
@@ -162,7 +160,7 @@ class FirestoreService:
             session_id: Session document ID
             update_data: Data to update
         """
-        doc_ref = get_db().collection("sessions").document(session_id)
+        doc_ref = db.collection("sessions").document(session_id)
         doc_ref.update(update_data)
 
     @staticmethod
@@ -176,8 +174,10 @@ class FirestoreService:
         Returns:
             Document ID of the created game
         """
-        doc_ref = get_db().collection("games").document()
-        doc_ref.set({**game_data, "createdAt": firestore.SERVER_TIMESTAMP})
+        doc_ref = db.collection("games").document()
+        doc_ref.set(
+            {**game_data, "startTime": firestore.SERVER_TIMESTAMP, "status": "active"}
+        )
         return doc_ref.id
 
     @staticmethod
@@ -191,7 +191,7 @@ class FirestoreService:
         Returns:
             Game data or None
         """
-        doc_ref = get_db().collection("games").document(game_id)
+        doc_ref = db.collection("games").document(game_id)
         doc = doc_ref.get()
 
         if doc.exists:
@@ -209,7 +209,7 @@ class FirestoreService:
             game_id: Game document ID
             update_data: Data to update
         """
-        doc_ref = get_db().collection("games").document(game_id)
+        doc_ref = db.collection("games").document(game_id)
         doc_ref.update(update_data)
 
     @staticmethod
@@ -225,31 +225,9 @@ class FirestoreService:
             Turn document ID
         """
         doc_ref = (
-            get_db()
-            .collection("games")
-            .document(game_id)
-            .collection("turns")
-            .document()
+            db.collection("games").document(game_id).collection("turns").document()
         )
         doc_ref.set({**turn_data, "timestamp": firestore.SERVER_TIMESTAMP})
-        return doc_ref.id
-
-    @staticmethod
-    async def add_chat_message(game_id: str, message_data: Dict) -> str:
-        """
-        Add a chat message to a game (subcollection 'chat')
-
-        Args:
-            game_id: Game document ID
-            message_data: Chat message information
-
-        Returns:
-            Message document ID
-        """
-        doc_ref = (
-            get_db().collection("games").document(game_id).collection("chat").document()
-        )
-        doc_ref.set({**message_data, "timestamp": firestore.SERVER_TIMESTAMP})
         return doc_ref.id
 
     @staticmethod
@@ -261,7 +239,7 @@ class FirestoreService:
             version: Model version (e.g., 'v1.0.1')
             metadata: Model metadata (accuracy, loss, etc.)
         """
-        doc_ref = get_db().collection("models").document(version)
+        doc_ref = db.collection("models").document(version)
         doc_ref.set(
             {
                 "version": version,
@@ -281,9 +259,7 @@ class FirestoreService:
         Returns:
             Active model metadata or None
         """
-        query = (
-            get_db().collection("models").where("active", "==", True).limit(1).stream()
-        )
+        query = db.collection("models").where("active", "==", True).limit(1).stream()
 
         for doc in query:
             data = doc.to_dict()
@@ -303,7 +279,7 @@ class FirestoreService:
         Returns:
             List of games
         """
-        query = get_db().collection("games").where("status", "==", status)
+        query = db.collection("games").where("status", "==", status)
 
         if game_type:
             query = query.where("game_type", "==", game_type)

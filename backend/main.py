@@ -12,6 +12,7 @@ from PIL import Image
 import base64
 from io import BytesIO
 import os
+import json
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, auth
@@ -53,17 +54,61 @@ model = None
 MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
 CATEGORIES = os.getenv("CATEGORIES", "").split(",")
 
+
+# Validate categories order on startup
+def validate_categories_order():
+    """Validate that CATEGORIES order matches the model metadata."""
+    try:
+        metadata_path = f"./models/quickdraw_{MODEL_VERSION}_metadata.json"
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+                expected_categories = metadata.get("categories", [])
+
+                if CATEGORIES != expected_categories:
+                    print("\n⚠️  WARNING: Category order mismatch detected!")
+                    print("   Expected (from model metadata):")
+                    print(f"   {expected_categories}")
+                    print("   Current (from .env):")
+                    print(f"   {CATEGORIES}")
+                    print("   ⚠️  This will cause INCORRECT predictions!\n")
+                    return False
+                else:
+                    print("✅ Category order validation: PASSED")
+                    return True
+        else:
+            print(f"⚠️  Metadata file not found: {metadata_path}")
+            return False
+    except Exception as e:
+        print(f"⚠️  Error validating categories: {e}")
+        return False
+
+
 # Firebase initialization
 try:
     cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "./serviceAccountKey.json")
+
+    # Check if we should use emulator
+    use_emulator = os.getenv("USE_FIRESTORE_EMULATOR", "false").lower() == "true"
+
     if os.path.exists(cred_path):
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred)
-        print("✅ Firebase Admin SDK initialized")
+
+        # Configure emulator if needed
+        if use_emulator:
+            os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"
+            print("🔧 Firebase Admin SDK initialized with EMULATOR mode")
+            print("   → Firestore Emulator: localhost:8080")
+        else:
+            print("✅ Firebase Admin SDK initialized (Production mode)")
     else:
         print("⚠️  Firebase credentials not found - Auth disabled")
 except Exception as e:
     print(f"⚠️  Firebase initialization failed: {e}")
+
+# Run category validation on startup
+validate_categories_order()
 
 
 # Pydantic models

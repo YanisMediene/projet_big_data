@@ -1,0 +1,80 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Fonction pour vérifier si l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Fonction pour vérifier si l'utilisateur est le propriétaire
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Collections publiques (lecture seule)
+    match /models/{modelId} {
+      allow read: if true;
+      allow write: if false; // Seul le backend peut écrire
+    }
+    
+    // Corrections - Lecture/écriture pour utilisateurs authentifiés
+    match /corrections/{correctionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isOwner(resource.data.user_id);
+    }
+    
+    // Sessions utilisateurs - Privé
+    match /sessions/{sessionId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.user_id);
+      allow create: if isAuthenticated();
+      allow update, delete: if isOwner(resource.data.user_id);
+    }
+    
+    // Users - Données utilisateur
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isOwner(userId);
+      
+      // Settings utilisateur (sous-collection)
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Stats utilisateur (sous-collection)
+      match /stats/{statId} {
+        allow read: if isAuthenticated();
+        allow write: if isOwner(userId);
+      }
+    }
+    
+    // Games - Parties multijoueur (sans authentification requise)
+    match /games/{gameId} {
+      allow read: if true; // Public pour rejoindre les parties
+      allow create: if true; // Permettre création sans auth
+      allow update: if true; // Permettre updates sans auth (pour dessins, scores, etc.)
+      allow delete: if false; // Empêcher suppression par les clients
+      
+      // Turns de la partie (sous-collection)
+      match /turns/{turnId} {
+        allow read: if true;
+        allow create: if true; // Permettre création sans auth
+      }
+      
+      // Chat de la partie (sous-collection)
+      match /chat/{messageId} {
+        allow read: if true;
+        allow create: if true; // Permettre création sans auth
+      }
+    }
+    
+    // Analytics (lecture seule pour users, écriture backend uniquement)
+    match /analytics/{analyticsId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Backend only
+    }
+  }
+}

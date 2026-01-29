@@ -42,9 +42,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Rate limits: (max_requests, time_window_seconds)
         self.limits = {
-            "/predict": (10, 60),  # 10 predictions per minute
+            "/predict": (60, 60),  # 60 predictions per minute (dev mode)
             "/admin": (5, 60),  # 5 admin actions per minute
-            "default": (30, 60),  # 30 requests per minute for other endpoints
+            "default": (100, 60),  # 100 requests per minute for other endpoints
         }
 
     def get_client_ip(self, request: Request) -> str:

@@ -24,6 +24,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le code de l'application
 COPY main.py .
 COPY models/ ./models/
+COPY middleware/ ./middleware/
+COPY routers/ ./routers/
+COPY services/ ./services/
+COPY monitoring.py .
 COPY serviceAccountKey.json .
 
 # Exposer le port (Cloud Run utilise PORT env variable)

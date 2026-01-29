@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { db } from '../../firebase';
 import { doc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import DrawingCanvas from '../DrawingCanvas';
-import { trackGameStarted, trackGameCompleted } from '../../services/analytics';
+import { trackGameStarted } from '../../services/analytics';
 import './Multiplayer.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -15,14 +15,19 @@ function GuessingGame() {
   
   const [game, setGame] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(90);
-  const [chatMessages, setChat Messages] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [guessInput, setGuessInput] = useState('');
   const [aiPredictions, setAiPredictions] = useState([]);
+  const [currentPrediction, setCurrentPrediction] = useState(null);
   const [canvasImage, setCanvasImage] = useState(null);
+  const [roundNotification, setRoundNotification] = useState(null);
+  const [viewerCanvasImage, setViewerCanvasImage] = useState(null);
   
   const chatEndRef = useRef(null);
-  const predictionIntervalRef = useRef(null);
+  const previousRoundRef = useRef(null);
+  const canvasRef = useRef(null);
+  const viewerCanvasRef = useRef(null);
 
   // Listen to game updates
   useEffect(() => {
@@ -34,15 +39,59 @@ function GuessingGame() {
         const gameData = { id: doc.id, ...doc.data() };
         setGame(gameData);
         
+        // Detect round change
+        if (previousRoundRef.current !== null && 
+            gameData.current_round !== previousRoundRef.current && 
+            gameData.status === 'playing') {
+          // Clear canvas for drawer
+          if (canvasRef.current) {
+            canvasRef.current.clearCanvas();
+          }
+          
+          // Show round notification
+          const lastWinner = gameData.round_winners?.[gameData.round_winners.length - 1];
+          let message = `Round ${gameData.current_round} !`;
+          if (lastWinner) {
+            message = lastWinner.winner === 'humans' 
+              ? `Round ${previousRoundRef.current} gagné par ${lastWinner.guesser} !`
+              : `Round ${previousRoundRef.current} gagné par l'IA !`;
+          }
+          
+          setRoundNotification(message);
+          setTimeout(() => setRoundNotification(null), 3000);
+        }
+        
+        previousRoundRef.current = gameData.current_round;
+        
         if (gameData.status === 'playing' && gameData.round_start_time) {
           const elapsed = (Date.now() - gameData.round_start_time.toMillis()) / 1000;
           const remaining = Math.max(0, gameData.settings.round_duration - elapsed);
           setTimeRemaining(Math.floor(remaining));
         }
         
-        // Update AI predictions from game state
+        // Update AI predictions from game state (merge with local predictions)
         if (gameData.team_ai?.predictions) {
-          setAiPredictions(gameData.team_ai.predictions);
+          setAiPredictions(prev => {
+            // Get existing prediction timestamps
+            const existingTimestamps = new Set(prev.map(p => p.timestamp));
+            
+            // Add new predictions from Firestore that we don't have locally
+            const newPredictions = gameData.team_ai.predictions
+              .filter(p => !existingTimestamps.has(p.timestamp))
+              .map(p => ({
+                timestamp: p.timestamp?.toMillis ? p.timestamp.toMillis() : p.timestamp,
+                prediction: p.prediction,
+                confidence: p.confidence
+              }));
+            
+            // Combine and keep last 10
+            return [...prev, ...newPredictions].slice(-10);
+          });
+        }
+        
+        // Update canvas state for viewers (non-drawers)
+        if (gameData.canvas_state) {
+          setViewerCanvasImage(gameData.canvas_state);
         }
       }
     });
@@ -50,7 +99,7 @@ function GuessingGame() {
     return () => unsubscribe();
   }, [gameId]);
 
-  // Listen to chat messages
+  // Listen to chat messages (using 'turns' subcollection as backend writes to 'chat' now)
   useEffect(() => {
     if (!gameId) return;
 
@@ -73,6 +122,22 @@ function GuessingGame() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Update viewer canvas when canvas_state changes
+  useEffect(() => {
+    if (!viewerCanvasRef.current || !viewerCanvasImage) return;
+    
+    const canvas = viewerCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+    
+    img.src = `data:image/png;base64,${viewerCanvasImage}`;
+  }, [viewerCanvasImage]);
+
   // Countdown timer
   useEffect(() => {
     if (game?.status !== 'playing') return;
@@ -81,6 +146,8 @@ function GuessingGame() {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
+          // Call timeout endpoint
+          handleTimeout();
           return 0;
         }
         return prev - 1;
@@ -90,42 +157,31 @@ function GuessingGame() {
     return () => clearInterval(interval);
   }, [game?.status, game?.current_round]);
 
-  // AI Prediction streaming (every 500ms for drawer)
+  // Update canvas state in Firestore when drawer draws
   useEffect(() => {
     if (!game || game.status !== 'playing') return;
     if (!currentUser || game.current_drawer?.player_id !== currentUser.uid) return;
     if (!canvasImage) return;
 
-    const streamPredictions = async () => {
+    const updateCanvasState = async () => {
       try {
-        const response = await fetch(`${API_URL}/predict`, {
+        await fetch(`${API_URL}/games/guessing/update-canvas`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_data: canvasImage }),
+          body: JSON.stringify({ 
+            game_id: gameId,
+            canvas_state: canvasImage 
+          }),
         });
-
-        if (response.ok) {
-          const prediction = await response.json();
-          
-          // Add to AI predictions list (shown to all players)
-          const newPrediction = {
-            timestamp: Date.now(),
-            prediction: prediction.prediction,
-            confidence: prediction.confidence,
-          };
-          
-          setAiPredictions(prev => [...prev, newPrediction].slice(-10)); // Keep last 10
-        }
       } catch (error) {
-        console.error('Error getting AI prediction:', error);
+        console.error('Error updating canvas state:', error);
       }
     };
 
-    const interval = setInterval(streamPredictions, game.settings.prediction_interval || 500);
-    predictionIntervalRef.current = interval;
-
-    return () => clearInterval(interval);
-  }, [game, currentUser, canvasImage]);
+    // Throttle updates to avoid excessive writes (max 1 per second)
+    const timeout = setTimeout(updateCanvasState, 1000);
+    return () => clearTimeout(timeout);
+  }, [game, currentUser, canvasImage, gameId]);
 
   const handleStartGame = async () => {
     try {
@@ -141,6 +197,50 @@ function GuessingGame() {
     } catch (error) {
       console.error('Error starting game:', error);
       alert(error.message);
+    }
+  };
+
+  const handleTimeout = async () => {
+    try {
+      await fetch(`${API_URL}/games/guessing/timeout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId }),
+      });
+    } catch (error) {
+      console.error('Error handling timeout:', error);
+    }
+  };
+
+  const handleAiPrediction = async (predictionData) => {
+    // Update local prediction display
+    setCurrentPrediction(predictionData);
+
+    // Add to AI predictions list
+    const newPrediction = {
+      timestamp: Date.now(),
+      prediction: predictionData.prediction,
+      confidence: predictionData.confidence,
+    };
+    setAiPredictions(prev => [...prev, newPrediction].slice(-10)); // Keep last 10
+
+    // Submit AI prediction to backend if drawer and canvas image exists
+    if (predictionData.prediction && canvasImage && currentUser && 
+        game?.current_drawer?.player_id === currentUser.uid) {
+      try {
+        await fetch(`${API_URL}/games/guessing/ai-prediction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            game_id: gameId,
+            round_number: game.current_round,
+            prediction: predictionData.prediction,
+            confidence: predictionData.confidence,
+          }),
+        });
+      } catch (error) {
+        console.error('Error submitting AI prediction:', error);
+      }
     }
   };
 
@@ -186,7 +286,6 @@ function GuessingGame() {
       const result = await response.json();
       
       if (result.status === 'correct_guess') {
-        alert(`🎉 Bonne réponse ! Les humains gagnent ce round !`);
         setGuessInput('');
       } else if (result.status === 'incorrect_guess') {
         // Show feedback but don't clear input
@@ -211,6 +310,13 @@ function GuessingGame() {
 
   return (
     <div className="guessing-game">
+      {/* Round notification */}
+      {roundNotification && (
+        <div className="round-notification">
+          {roundNotification}
+        </div>
+      )}
+      
       {/* Header */}
       <div className="game-header">
         <div className="game-info">
@@ -325,13 +431,29 @@ function GuessingGame() {
                     <p>Vos coéquipiers doivent deviner avant que l'IA atteigne 85%</p>
                   </div>
                   <DrawingCanvas
+                    ref={canvasRef}
                     onCanvasChange={setCanvasImage}
-                    enablePrediction={false}
+                    enablePrediction={true}
+                    onPrediction={handleAiPrediction}
+                    debounceTime={500}
                   />
                 </div>
               ) : (
                 <div className="guesser-area">
-                  <h3>Devinez ce que dessine {game.current_drawer?.player_name} !</h3>
+                  <div className="guesser-instructions">
+                    <h3>Devinez ce que dessine {game.current_drawer?.player_name} !</h3>
+                    <p className="guess-hint">
+                      Tapez votre réponse rapidement avant que l'IA ne devine !
+                    </p>
+                  </div>
+                  <div className="viewer-canvas">
+                    <canvas
+                      ref={viewerCanvasRef}
+                      width={400}
+                      height={400}
+                      style={{ border: '2px solid #ccc', borderRadius: '8px', backgroundColor: '#fff' }}
+                    />
+                  </div>
                   <form onSubmit={handleSubmitGuess} className="guess-form">
                     <input
                       type="text"
@@ -342,9 +464,6 @@ function GuessingGame() {
                     />
                     <button type="submit">Deviner</button>
                   </form>
-                  <p className="guess-hint">
-                    Soyez rapide ! L'IA fait des prédictions toutes les 500ms
-                  </p>
                 </div>
               )}
             </>

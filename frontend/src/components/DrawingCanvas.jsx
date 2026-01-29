@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 /**
  * DrawingCanvas Component
  * 
@@ -9,11 +11,20 @@ import React, { useRef, useState, useEffect } from 'react';
  * - Stroke rendering with adjustable brush size
  * - Clear canvas functionality
  * - Export canvas as base64 image
+ * - AI predictions with debouncing
  */
-const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
+const DrawingCanvas = ({ 
+  onDrawingChange, 
+  onPrediction, 
+  onCanvasChange,
+  enablePrediction = false,
+  debounceTime = 500
+}) => {
   const canvasRef = useRef(null);
   const [isMouseDown, setIsMouseDown] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
   const [lastPosition, setLastPosition] = useState({ x: 0, y: 0 });
+  const debounceTimerRef = useRef(null);
 
   // Canvas configuration
   const CANVAS_SIZE = 280; // 280x280px
@@ -23,7 +34,7 @@ const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) {
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.fillStyle = '#FFFFFF'; // White background
       ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
       ctx.strokeStyle = BRUSH_COLOR;
@@ -32,6 +43,30 @@ const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
       ctx.lineJoin = 'round';
     }
   }, []);
+
+  // Prediction function
+  const getPrediction = async (base64Image) => {
+    if (!enablePrediction || !onPrediction) return;
+
+    try {
+      const response = await fetch(`${API_URL}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: `data:image/png;base64,${base64Image}` }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        onPrediction({
+          prediction: data.prediction,
+          confidence: data.confidence,
+          top_predictions: data.top_predictions || [],
+        });
+      }
+    } catch (error) {
+      console.error('Prediction error:', error);
+    }
+  };
 
   const getCanvasCoordinates = (event) => {
     const canvas = canvasRef.current;
@@ -49,10 +84,17 @@ const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
 
   const startDrawing = (event) => {
     event.preventDefault();
+    const coords = getCanvasCoordinates(event);
     setIsMouseDown(true);
     setIsDrawing(true);
-    const coords = getCanvasCoordinates(event);
     setLastPosition(coords);
+    
+    // Draw a point at the starting position
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(coords.x, coords.y, BRUSH_SIZE / 2, 0, Math.PI * 2);
+    ctx.fill();
   };
 
   const draw = (event) => {
@@ -71,9 +113,20 @@ const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
 
     setLastPosition(currentPosition);
 
-    // Trigger callback with canvas data (debounced in api.js)
+    // Trigger callbacks with canvas data
     const base64Image = canvas.toDataURL('image/png').split(',')[1];
-    onDrawingChange(base64Image);
+    if (onDrawingChange) onDrawingChange(base64Image);
+    if (onCanvasChange) onCanvasChange(base64Image);
+
+    // Trigger prediction with debounce
+    if (enablePrediction) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        getPrediction(base64Image);
+      }, debounceTime);
+    }
   };
 
   const stopDrawing = () => {
@@ -86,7 +139,8 @@ const DrawingCanvas = ({ onDrawingChange, isDrawing, setIsDrawing }) => {
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
     setIsDrawing(false);
-    onDrawingChange(null); // Clear predictions
+    if (onDrawingChange) onDrawingChange(null);
+    if (onCanvasChange) onCanvasChange(null);
   };
 
   return (

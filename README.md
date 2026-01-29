@@ -32,33 +32,33 @@ AI Pictionary is a production-grade "Quick, Draw!" clone that demonstrates cloud
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    PRODUCTION (GCP + Firebase)                      │
 │                                                                     │
-│  ┌────────────────────────────────────────────────────────────┐    │
-│  │  Firebase Hosting (Global CDN)                             │    │
-│  │  URL: https://ai-pictionary-4f8f2.web.app                  │    │
-│  │  - React SPA (80.29 KB gzipped)                            │    │
-│  │  - Cache: 1 year for static assets                        │    │
-│  └────────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────────┐     │
+│  │  Firebase Hosting (Global CDN)                             │     │
+│  │  URL: https://ai-pictionary-4f8f2.web.app                  │     │
+│  │  - React SPA (80.29 KB gzipped)                            │     │
+│  │  - Cache: 1 year for static assets                         │     │
+│  └────────────────────────────────────────────────────────────┘     │
 │                              │ HTTPS                                │
-│                              ▼                                       │
-│  ┌────────────────────────────────────────────────────────────┐    │
-│  │  Google Cloud Run (europe-west1)                           │    │
-│  │  URL: https://ai-pictionary-backend-*.run.app              │    │
-│  │  - FastAPI in Docker (Python 3.11-slim)                    │    │
-│  │  - TensorFlow 2.16.2 + Model (500MB image)                 │    │
-│  │  - Resources: 1GB RAM, 1 CPU                               │    │
-│  │  - Scaling: 0-10 instances (scale-to-zero)                 │    │
-│  │  - Cold start: 2-5s, Warm: <100ms                          │    │
-│  └────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌────────────────────────────────────────────────────────────┐    │
-│  │  Firebase Services                                          │    │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │    │
-│  │  │   Auth     │  │ Firestore  │  │  Storage   │            │    │
-│  │  │ (Google,   │  │ (NoSQL DB) │  │ (Objects)  │            │    │
-│  │  │  Email)    │  │  Real-time │  │  Models    │            │    │
-│  │  └────────────┘  └────────────┘  └────────────┘            │    │
-│  └────────────────────────────────────────────────────────────┘    │
+│                              ▼                                      │
+│  ┌────────────────────────────────────────────────────────────┐     │
+│  │  Google Cloud Run (europe-west1)                           │     │
+│  │  URL: https://ai-pictionary-backend-*.run.app              │     │
+│  │  - FastAPI in Docker (Python 3.11-slim)                    │     │
+│  │  - TensorFlow 2.16.2 + Model (500MB image)                 │     │
+│  │  - Resources: 1GB RAM, 1 CPU                               │     │
+│  │  - Scaling: 0-10 instances (scale-to-zero)                 │     │
+│  │  - Cold start: 2-5s, Warm: <100ms                          │     │
+│  └────────────────────────────────────────────────────────────┘     │
+│                              │                                      │
+│                              ▼                                      │
+│  ┌────────────────────────────────────────────────────────────┐     │
+│  │  Firebase Services                                         │     │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │     │
+│  │  │   Auth     │  │ Firestore  │  │  Storage   │            │     │
+│  │  │ (Google,   │  │ (NoSQL DB) │  │ (Objects)  │            │     │
+│  │  │  Email)    │  │  Real-time │  │  Models    │            │     │
+│  │  └────────────┘  └────────────┘  └────────────┘            │     │
+│  └────────────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────────────┘
 
                         ┌─── Client Request Flow ───┐
@@ -77,8 +77,8 @@ AI Pictionary is a production-grade "Quick, Draw!" clone that demonstrates cloud
 ┌─────────────────────────────────────────────────────────────────┐
 │                    LOCAL DEVELOPMENT                            │
 │                                                                 │
-│  React Frontend          FastAPI Backend       TensorFlow CNN  │
-│  (localhost:3000)   ←──→ (localhost:8000)  ←──→ Model (.h5)    │
+│  React Frontend          FastAPI Backend       TensorFlow CNN   │
+│  (localhost:3000)   ←──→ (localhost:8000)  ←──→ Model (.h5)     │
 │                                                                 │
 │  Firebase SDK (connects to production Firebase services)        │
 └─────────────────────────────────────────────────────────────────┘

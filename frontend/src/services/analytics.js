@@ -9,11 +9,17 @@ import { app } from '../firebase';
 // Initialize Firebase Analytics
 let analytics = null;
 
+// Only initialize analytics in production
+const isProduction = process.env.NODE_ENV === 'production' && 
+                     window.location.hostname !== 'localhost';
+
 try {
   // Analytics only works in browser environment with supported browsers
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && isProduction) {
     analytics = getAnalytics(app);
     console.log('✅ Firebase Analytics initialized');
+  } else {
+    console.log('🔧 Firebase Analytics disabled in development');
   }
 } catch (error) {
   console.warn('⚠️  Firebase Analytics initialization failed:', error);
@@ -201,7 +207,7 @@ export class PerformanceTracker {
   }
 }
 
-export default {
+const analyticsService = {
   logEvent: logAnalyticsEvent,
   trackDrawingCompleted,
   trackPredictionMade,
@@ -216,3 +222,5 @@ export default {
   trackPageView,
   PerformanceTracker,
 };
+
+export default analyticsService;
