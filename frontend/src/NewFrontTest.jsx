@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { predictDrawing, getCategories } from './services/api';
 import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
+import * as MultiplayerService from './services/multiplayerService';
 
 // --- CONSTANTES GLOBALES ---
 const TOTAL_ROUNDS_CLASSIC = 6;
@@ -11,12 +12,6 @@ const ROUND_TIME = 20;
 const WRONG_GUESSES = [
   "un truc", "aucune idée", "c'est quoi ça ?", "un ovni", 
   "bizarre...", "un chien ?", "une table ?", "abstrait"
-];
-
-const MOCK_LOBBIES = [
-  { id: 1, name: "Salon de Thomas", players: 3, max: 8 },
-  { id: 2, name: "Dessinateurs Fous", players: 5, max: 8 },
-  { id: 3, name: "Pro Only", players: 1, max: 8 },
 ];
 
 const INITIAL_MOCK_PLAYERS = [
@@ -34,12 +29,13 @@ export default function QuickDrawApp() {
   const [currentWord, setCurrentWord] = useState('');
   const [previousWord, setPreviousWord] = useState(''); // Pour éviter les répétitions
   const [drawings, setDrawings] = useState([]); 
-  const [players, setPlayers] = useState([
-    { id: 'me', name: "Moi", isHost: true, avatar: "😎", score: 0 },
-    { id: 2, name: "Thomas", isHost: false, avatar: "😺", score: 0 },
-    { id: 3, name: "Sarah", isHost: false, avatar: "🎨", score: 0 },
-    { id: 4, name: "Robot_X", isHost: false, avatar: "🤖", score: 0 },
-  ]);
+  const [players, setPlayers] = useState([]);
+  
+  // Multiplayer state
+  const [roomCode, setRoomCode] = useState('');
+  const [playerId, setPlayerId] = useState('');
+  const [isHost, setIsHost] = useState(false);
+  const [gameData, setGameData] = useState(null);
   
   // Liste des mots disponibles - chargée depuis l'API
   const [wordsToDrawFr, setWordsToDrawFr] = useState([]);
@@ -83,6 +79,10 @@ export default function QuickDrawApp() {
     setDrawings([]);
     setPreviousWord(''); // Reset le mot précédent
     setPlayers(INITIAL_MOCK_PLAYERS);
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(true);
+    setGameData(null);
     setGameState('PLAYING');
     prepareRound(1);
   };
@@ -93,15 +93,138 @@ export default function QuickDrawApp() {
     setRound(1);
     setDrawings([]);
     setPreviousWord('');
-    setPlayers(INITIAL_MOCK_PLAYERS);
+    setPlayers([]);
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(false);
+    setGameData(null);
     setGameState('LOBBY_FLOW');
   };
 
-  // Lobby Flow -> Playing
-  const startGameFromLobby = () => {
-    setGameState('PLAYING');
-    prepareRound(1);
+  // Handle multiplayer game created/joined
+  const handleMultiplayerJoined = useCallback((code, id, host) => {
+    setRoomCode(code);
+    setPlayerId(id);
+    setIsHost(host);
+  }, []);
+
+  // Handle game data updates from Firebase
+  const handleGameUpdate = useCallback((data) => {
+    if (!data) {
+      // Game deleted or doesn't exist
+      setGameState('MODE_SELECT');
+      return;
+    }
+    
+    console.log('🔄 handleGameUpdate - roundStatus:', data.roundStatus, 'gameState:', gameState);
+    setGameData(data);
+    
+    // If roundStatus is 'playing' and we still have overlay, dismiss it
+    if (data.roundStatus === 'playing' && showOverlay && gameState === 'PLAYING') {
+      console.log('🎬 Round is playing, dismissing overlay from handleGameUpdate');
+      setShowOverlay(false);
+    }
+    
+    // Convert players object to array
+    const playersArray = Object.values(data.players || {}).map(p => ({
+      ...p,
+      id: p.id === playerId ? 'me' : p.id
+    })).sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    setPlayers(playersArray);
+    
+    // Handle game state transitions
+    if (data.status === 'playing' && gameState === 'LOBBY_FLOW') {
+      // Game just started - transition to playing
+      setGameState('PLAYING');
+      setRound(data.currentRound || 1);
+      setCurrentWord(data.currentWord || '');
+      setShowOverlay(true);
+    } else if (data.status === 'playing' && gameState === 'PLAYING') {
+      // Update round info during game
+      if (data.currentRound !== round) {
+        // New round started
+        setRound(data.currentRound);
+        setCurrentWord(data.currentWord || '');
+        setShowOverlay(true);
+      }
+      
+      // Handle round status changes (waiting -> playing)
+      // The overlay will auto-dismiss when roundStatus becomes 'playing'
+      if (data.roundStatus === 'playing' && showOverlay) {
+        // Round has started, overlay will be dismissed by TransitionOverlay component
+        // via the roundStatus prop
+      }
+    } else if (data.status === 'finished') {
+      setGameState('GAME_OVER');
+    }
+  }, [playerId, gameState, round, showOverlay]);
+
+  // Subscribe to game updates when playing multiplayer
+  // This maintains the subscription after transitioning from LOBBY_FLOW to PLAYING
+  useEffect(() => {
+    if (gameState !== 'PLAYING' || !roomCode || gameMode === 'CLASSIC') {
+      return;
+    }
+    
+    console.log('📡 Setting up game subscription for playing state - room:', roomCode);
+    
+    const unsubscribe = MultiplayerService.subscribeToGame(roomCode, (data) => {
+      if (data) {
+        console.log('📥 Game update received:', { roundStatus: data.roundStatus, round: data.currentRound });
+        handleGameUpdate(data);
+      }
+    });
+    
+    return () => {
+      console.log('🔌 Cleaning up game subscription');
+      unsubscribe();
+    };
+  }, [gameState, roomCode, gameMode, handleGameUpdate]);
+
+  // Lobby Flow -> Playing (start game as host)
+  const startGameFromLobby = async () => {
+    if (gameMode === 'CLASSIC') {
+      setGameState('PLAYING');
+      prepareRound(1);
+    } else {
+      // Multiplayer - start game via Firebase
+      try {
+        await MultiplayerService.startGame(roomCode, wordsToDrawFr);
+        // State will be updated via subscription
+      } catch (error) {
+        console.error('Error starting game:', error);
+        alert('Erreur lors du démarrage de la partie');
+      }
+    }
   };
+
+  // Leave multiplayer game
+  const leaveMultiplayerGame = async () => {
+    if (roomCode && playerId) {
+      try {
+        await MultiplayerService.leaveGame(roomCode, playerId);
+      } catch (error) {
+        console.error('Error leaving game:', error);
+      }
+    }
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(false);
+    setGameData(null);
+    setGameState('MODE_SELECT');
+  };
+
+  // Force start round after timeout (5 seconds)
+  const handleForceStartRound = useCallback(async () => {
+    if (roomCode) {
+      try {
+        await MultiplayerService.forceStartRound(roomCode);
+      } catch (error) {
+        console.error('Error force starting round:', error);
+      }
+    }
+  }, [roomCode]);
 
   const prepareRound = (roundNum) => {
     // Ne pas démarrer si les catégories ne sont pas chargées
@@ -122,52 +245,85 @@ export default function QuickDrawApp() {
     setShowOverlay(true);
   };
 
-  const handleRoundComplete = (imageData, success, winner = null, timeLeft = 0, confidence = 0) => {
-    // Update scores based on game mode
-    if (gameMode === 'RACE' && success) {
-      // Calculate points based on time and confidence
-      // Base: 100 points
-      // Time bonus: 0-50 points (proportional to time left)
-      // Confidence bonus: 0-50 points (proportional to confidence)
-      const timeBonus = Math.round((timeLeft / ROUND_TIME) * 50);
-      const confidenceBonus = Math.round(confidence * 50);
-      const totalPoints = 100 + timeBonus + confidenceBonus;
-      
-      setPlayers(prevPlayers => 
-        prevPlayers.map(p => 
-          p.id === 'me' ? { ...p, score: p.score + totalPoints } : p
-        )
-      );
-    } else if (gameMode === 'TEAM') {
-      // In Team mode, update scores based on winner
-      if (winner === 'TEAM') {
-        setPlayers(prevPlayers => 
-          prevPlayers.map(p => 
-            p.id !== 'me' ? { ...p, score: p.score + 5 } : p
-          )
-        );
-      }
-      // Note: AI score is tracked separately in state if needed
+  const handleRoundComplete = async (imageData, success, winner = null, timeLeft = 0, confidence = 0) => {
+    // Calculate points
+    let totalPoints = 0;
+    const timeBonus = Math.round((timeLeft / ROUND_TIME) * 50);
+    const confidenceBonus = Math.round(confidence * 50);
+    
+    if (success) {
+      totalPoints = 100 + timeBonus + confidenceBonus;
     }
 
-    // Save drawing
+    // In multiplayer mode, submit result to Firebase
+    if ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode && playerId) {
+      try {
+        await MultiplayerService.submitRoundResult(
+          roomCode,
+          playerId.replace('me', playerId), // Use real player ID
+          success,
+          confidence,
+          timeLeft
+        );
+        
+        // The score update will come from Firebase subscription
+        // No need to update local state manually
+      } catch (error) {
+        console.error('Error submitting round result:', error);
+      }
+    } else {
+      // Classic mode - update scores locally
+      if (gameMode === 'RACE' && success) {
+        setPlayers(prevPlayers => 
+          prevPlayers.map(p => 
+            p.id === 'me' ? { ...p, score: p.score + totalPoints } : p
+          )
+        );
+      } else if (gameMode === 'TEAM') {
+        // In Team mode, update scores based on winner
+        if (winner === 'TEAM') {
+          setPlayers(prevPlayers => 
+            prevPlayers.map(p => 
+              p.id !== 'me' ? { ...p, score: p.score + 5 } : p
+            )
+          );
+        }
+      }
+    }
+
+    // Save drawing locally
     const newDrawings = [...drawings, { word: currentWord, imageData, success, winner }];
     setDrawings(newDrawings);
 
     const totalRounds = gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC;
 
-    if (round < totalRounds) {
-      // Fermer l'overlay d'abord (si jamais il était ouvert)
-      setShowOverlay(false);
-      
-      // Attendre que l'overlay soit fermé avant de préparer le prochain round
-      setTimeout(() => {
-        setRound(round + 1);
-        prepareRound(round + 1);
-      }, 600); // 600ms pour laisser le temps à l'animation de fermeture (500ms) de se terminer
-    } else {
-      setGameState('GAME_OVER');
+    // In multiplayer mode, host handles round transitions via Firebase
+    if ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode && isHost) {
+      // Wait a bit for other players to submit, then advance round
+      setTimeout(async () => {
+        try {
+          if (round < totalRounds) {
+            await MultiplayerService.nextRound(roomCode, wordsToDrawFr);
+          } else {
+            await MultiplayerService.endGame(roomCode);
+          }
+        } catch (error) {
+          console.error('Error advancing round:', error);
+        }
+      }, 2000); // Wait 2 seconds for other players
+    } else if (gameMode === 'CLASSIC') {
+      // Classic mode - handle locally
+      if (round < totalRounds) {
+        setShowOverlay(false);
+        setTimeout(() => {
+          setRound(round + 1);
+          prepareRound(round + 1);
+        }, 600);
+      } else {
+        setGameState('GAME_OVER');
+      }
     }
+    // In multiplayer non-host mode, state updates come from Firebase subscription
   };
 
   // --- RENDER ---
@@ -200,9 +356,15 @@ export default function QuickDrawApp() {
       {gameState === 'LOBBY_FLOW' && (
         <MultiplayerFlow
           mode={gameMode}
-          onBack={() => setGameState('MODE_SELECT')}
+          onBack={leaveMultiplayerGame}
           onStartGame={startGameFromLobby}
           players={players}
+          roomCode={roomCode}
+          playerId={playerId}
+          isHost={isHost}
+          onJoined={handleMultiplayerJoined}
+          onGameUpdate={handleGameUpdate}
+          wordsToDrawFr={wordsToDrawFr}
         />
       )}
 
@@ -221,6 +383,12 @@ export default function QuickDrawApp() {
             isPaused={showOverlay} 
             onComplete={handleRoundComplete}
             onQuit={() => setGameState('WELCOME')}
+            // Team mode props
+            roomCode={roomCode}
+            playerId={playerId}
+            currentDrawerId={gameData?.currentDrawerId}
+            gameData={gameData}
+            isHost={isHost}
           />
           
           <TransitionOverlay 
@@ -229,6 +397,15 @@ export default function QuickDrawApp() {
             round={round}
             totalRounds={gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC}
             onDismiss={() => setShowOverlay(false)}
+            // Multiplayer props
+            isMultiplayer={(gameMode === 'RACE' || gameMode === 'TEAM') && !!roomCode}
+            gameMode={gameMode}
+            roomCode={roomCode}
+            playerId={playerId}
+            players={players}
+            roundStatus={gameData?.roundStatus || ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode ? 'waiting' : 'playing')}
+            currentDrawerId={gameData?.currentDrawerId}
+            onForceStart={handleForceStartRound}
           />
         </>
       )}
@@ -345,14 +522,42 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
   );
 }
 
-// The sliding panel (Curtain)
-function TransitionOverlay({ isVisible, word, round, totalRounds, onDismiss }) {
+// The sliding panel (Curtain) - supports multiplayer sync
+function TransitionOverlay({ 
+  isVisible, 
+  word, 
+  round, 
+  totalRounds, 
+  onDismiss,
+  // Multiplayer props
+  isMultiplayer = false,
+  gameMode = 'CLASSIC',
+  roomCode = '',
+  playerId = '',
+  players = [],
+  roundStatus = 'playing', // 'waiting' or 'playing'
+  currentDrawerId = null, // For TEAM mode
+  onForceStart = null
+}) {
   // We use internal state to handle the CSS transition classes
   const [renderState, setRenderState] = useState('hidden'); // hidden, entering, visible, exiting
+  const [countdown, setCountdown] = useState(5);
+  const [hasClickedReady, setHasClickedReady] = useState(false);
+  const countdownStartedRef = useRef(false);
+  
+  // Check if current player is the drawer (TEAM mode)
+  const isDrawer = gameMode === 'TEAM' && currentDrawerId === playerId;
+  const isTeamMode = gameMode === 'TEAM';
+  
+  // Find drawer info
+  const drawerPlayer = isTeamMode ? players.find(p => p.id === currentDrawerId || (p.id === 'me' && currentDrawerId === playerId)) : null;
 
   useEffect(() => {
     if (isVisible) {
       setRenderState('entering');
+      setCountdown(5);
+      setHasClickedReady(false);
+      countdownStartedRef.current = false;
       // Force reflow/next tick to start animation
       setTimeout(() => setRenderState('visible'), 50);
     } else {
@@ -363,6 +568,77 @@ function TransitionOverlay({ isVisible, word, round, totalRounds, onDismiss }) {
     }
   }, [isVisible]);
 
+  // Countdown timer for multiplayer mode
+  useEffect(() => {
+    if (!isMultiplayer || !isVisible || roundStatus !== 'waiting') return;
+    
+    // Don't restart if already started
+    if (countdownStartedRef.current) return;
+    countdownStartedRef.current = true;
+    
+    console.log('🕐 Starting countdown for multiplayer round...');
+    setCountdown(5);
+    
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Force start after countdown
+          console.log('⏰ Countdown finished, forcing start...');
+          if (onForceStart && roomCode) {
+            onForceStart();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isMultiplayer, isVisible, roundStatus, onForceStart, roomCode]);
+
+  // When round starts (roundStatus changes to 'playing'), dismiss overlay
+  useEffect(() => {
+    console.log('🎯 TransitionOverlay roundStatus check:', { roundStatus, isMultiplayer, isVisible });
+    if (isMultiplayer && roundStatus === 'playing' && isVisible) {
+      console.log('✅ Dismissing overlay - roundStatus is playing');
+      onDismiss();
+    }
+  }, [roundStatus, isMultiplayer, isVisible, onDismiss]);
+  
+  // Fallback: also dismiss when countdown reaches 0 (force start triggered)
+  useEffect(() => {
+    if (isMultiplayer && countdown === 0 && isVisible) {
+      // Give a small delay for Firebase to update, then force dismiss
+      const timer = setTimeout(() => {
+        console.log('⚡ Force dismissing overlay after countdown');
+        onDismiss();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown, isMultiplayer, isVisible, onDismiss]);
+
+  const handleReadyClick = async () => {
+    console.log('🖱️ Ready clicked - isMultiplayer:', isMultiplayer, 'roomCode:', roomCode, 'playerId:', playerId, 'hasClickedReady:', hasClickedReady);
+    
+    if (isMultiplayer && roomCode && playerId && !hasClickedReady) {
+      setHasClickedReady(true);
+      try {
+        console.log('📤 Marking player ready:', playerId);
+        await MultiplayerService.markPlayerReady(roomCode, playerId);
+        console.log('✅ Player marked ready');
+      } catch (error) {
+        console.error('❌ Error marking ready:', error);
+        setHasClickedReady(false); // Reset so user can try again
+      }
+    } else if (!isMultiplayer) {
+      // Classic mode - just dismiss
+      onDismiss();
+    }
+  };
+
   // Determine CSS class based on state
   const getTransformClass = () => {
     if (renderState === 'entering') return 'translate-y-[-100%]';
@@ -371,23 +647,102 @@ function TransitionOverlay({ isVisible, word, round, totalRounds, onDismiss }) {
     return 'translate-y-[-100%]'; // hidden default
   };
 
+  // Count ready players
+  const readyCount = players.filter(p => p.isReady).length;
+  const totalPlayers = players.length;
+
   return (
     <div 
       className={`fixed inset-0 z-50 flex items-center justify-center bg-[#ECECEC] transition-transform duration-500 ease-in-out ${getTransformClass()}`}
       style={{ willChange: 'transform' }}
     >
        <div className="bg-white p-10 md:p-14 rounded-sm border-4 border-black text-center shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-2xl w-full mx-4">
-        <p className="text-2xl text-gray-500 mb-4">
-          Niveau {round}/{totalRounds} • Dessinez :
-        </p>
-        <h2 className="text-5xl md:text-6xl font-bold mb-10 capitalize">{word}</h2>
-        <p className="text-xl text-gray-500 mb-10">en moins de {ROUND_TIME} secondes</p>
+        
+        {/* TEAM mode - Different display for drawer vs guessers */}
+        {isTeamMode ? (
+          <>
+            <p className="text-2xl text-gray-500 mb-4">
+              Niveau {round}/{totalRounds}
+            </p>
+            
+            {isDrawer ? (
+              <>
+                <p className="text-lg text-blue-600 font-bold mb-2">🎨 C'est à vous de dessiner !</p>
+                <h2 className="text-5xl md:text-6xl font-bold mb-6 capitalize">{word}</h2>
+                <p className="text-xl text-gray-500 mb-6">Faites deviner ce mot à votre équipe !</p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg text-purple-600 font-bold mb-2">🔮 Devinez le dessin !</p>
+                <div className="flex items-center justify-center gap-2 mb-6">
+                  <span className="text-2xl">{drawerPlayer?.avatar || '🎨'}</span>
+                  <span className="text-xl font-bold">{drawerPlayer?.name || 'Un joueur'}</span>
+                  <span className="text-xl text-gray-500">dessine...</span>
+                </div>
+                <h2 className="text-5xl md:text-6xl font-bold mb-6 text-gray-300">? ? ?</h2>
+                <p className="text-xl text-gray-500 mb-6">Utilisez le chat pour proposer vos réponses !</p>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-2xl text-gray-500 mb-4">
+              Niveau {round}/{totalRounds} • Dessinez :
+            </p>
+            <h2 className="text-5xl md:text-6xl font-bold mb-10 capitalize">{word}</h2>
+            <p className="text-xl text-gray-500 mb-6">en moins de {ROUND_TIME} secondes</p>
+          </>
+        )}
+        
+        {/* Multiplayer status */}
+        {isMultiplayer && roundStatus === 'waiting' && (
+          <div className="mb-6">
+            <div className="flex justify-center items-center gap-2 mb-4">
+              <div className="flex -space-x-2">
+                {players.map(player => (
+                  <div 
+                    key={player.id} 
+                    className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-lg transition-all ${
+                      player.isReady 
+                        ? 'border-green-500 bg-green-100' 
+                        : 'border-gray-300 bg-gray-100'
+                    }`}
+                    title={`${player.name} ${player.isReady ? '✓' : '...'}`}
+                  >
+                    {player.avatar}
+                  </div>
+                ))}
+              </div>
+              <span className="text-sm font-bold text-gray-500 ml-2">
+                {readyCount}/{totalPlayers} prêts
+              </span>
+            </div>
+            {/* Countdown */}
+            <div className="text-4xl font-bold text-blue-600 mb-4">
+              {countdown > 0 ? countdown : '🚀'}
+            </div>
+            <p className="text-sm text-gray-400">
+              {countdown > 0 
+                ? `Démarrage automatique dans ${countdown}s` 
+                : 'Démarrage...'
+              }
+            </p>
+          </div>
+        )}
         
         <button 
-          onClick={onDismiss}
-          className="btn-shadow bg-blue-600 text-white border-4 border-black text-2xl px-10 py-3 rounded-sm hover:bg-blue-500 transition-colors w-full md:w-auto font-bold"
+          onClick={handleReadyClick}
+          disabled={isMultiplayer && hasClickedReady && roundStatus === 'waiting'}
+          className={`btn-shadow border-4 border-black text-2xl px-10 py-3 rounded-sm transition-colors w-full md:w-auto font-bold ${
+            isMultiplayer && hasClickedReady && roundStatus === 'waiting'
+              ? 'bg-green-500 text-white cursor-default'
+              : 'bg-blue-600 text-white hover:bg-blue-500'
+          }`}
         >
-          C'est parti !
+          {isMultiplayer && hasClickedReady && roundStatus === 'waiting' 
+            ? '✓ Prêt !' 
+            : "C'est parti !"
+          }
         </button>
       </div>
     </div>
@@ -395,15 +750,20 @@ function TransitionOverlay({ isVisible, word, round, totalRounds, onDismiss }) {
 }
 
 // Multiplayer Flow Component (Lobby & Waiting Room)
-function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
+function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existingRoomCode, playerId: existingPlayerId, isHost: existingIsHost, onJoined, onGameUpdate, wordsToDrawFr }) {
   const [step, setStep] = useState('LOBBY'); // LOBBY, WAITING_ROOM
-  const [isHost, setIsHost] = useState(false);
-  const [roomCode, setRoomCode] = useState('');
-  const [playerName, setPlayerName] = useState('Moi');
+  const [localIsHost, setLocalIsHost] = useState(existingIsHost);
+  const [localRoomCode, setLocalRoomCode] = useState(existingRoomCode || '');
+  const [localPlayerId, setLocalPlayerId] = useState(existingPlayerId || '');
+  const [playerName, setPlayerName] = useState('Joueur');
   const [playerEmoji, setPlayerEmoji] = useState('😎');
+  const [availableGames, setAvailableGames] = useState([]);
+  const [joinCode, setJoinCode] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   // Liste d'emojis disponibles
-  const availableEmojis = ['😎', '😺', '🤖', '🦊', '🐼', '🐸', '🦁', '🐯', '🐨', '🐻'];
+  const availableEmojis = ['😎', '😺', '🤖', '🦊', '🐼', '🐸', '🦁', '🐯', '🐨', '🐻', '🎨', '🎮', '🌟', '🔥', '💎'];
 
   // Mode specific styles - NOW ALL BLUE
   const themeColor = 'bg-blue-600';
@@ -413,28 +773,157 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
   const modeName = mode === 'RACE' ? 'Mode Course' : 'Team vs IA';
   const modeIcon = mode === 'RACE' ? <Zap size={40} className="text-white" /> : <Users size={40} className="text-white" />;
 
-  const handleCreateGame = () => {
-    setIsHost(true);
-    setRoomCode(mode === 'RACE' ? 'X4J9' : 'T7M2');
-    setStep('WAITING_ROOM');
+  // Subscribe to available games list
+  useEffect(() => {
+    if (step !== 'LOBBY') return;
+
+    const unsubscribe = MultiplayerService.subscribeToAvailableGames(mode, (games) => {
+      setAvailableGames(games);
+    });
+
+    return () => unsubscribe();
+  }, [step, mode]);
+
+  // Subscribe to game updates when in waiting room
+  useEffect(() => {
+    if (step !== 'WAITING_ROOM' || !localRoomCode) return;
+
+    const unsubscribe = MultiplayerService.subscribeToGame(localRoomCode, (gameData) => {
+      if (gameData) {
+        onGameUpdate(gameData);
+        // Update local host status in case it changed
+        setLocalIsHost(gameData.hostId === localPlayerId);
+      } else {
+        // Game was deleted
+        setStep('LOBBY');
+        setError('La partie a été supprimée');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [step, localRoomCode, localPlayerId, onGameUpdate]);
+
+  // Heartbeat to keep player online
+  useEffect(() => {
+    if (step !== 'WAITING_ROOM' || !localRoomCode || !localPlayerId) return;
+
+    const interval = setInterval(() => {
+      MultiplayerService.updateHeartbeat(localRoomCode, localPlayerId);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [step, localRoomCode, localPlayerId]);
+
+  const handleCreateGame = async () => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.createGame(mode, playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(true);
+      onJoined(result.roomCode, result.playerId, true);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error creating game:', err);
+      setError(err.message || 'Erreur lors de la création');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleJoinGame = () => {
-    setIsHost(false);
-    setRoomCode(mode === 'RACE' ? 'X4J9' : 'T7M2');
-    setStep('WAITING_ROOM');
+  const handleJoinGameByCode = async () => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom');
+      return;
+    }
+    if (!joinCode.trim()) {
+      setError('Entrez le code de la partie');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.joinGame(joinCode.toUpperCase().trim(), playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(false);
+      onJoined(result.roomCode, result.playerId, false);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error joining game:', err);
+      setError(err.message || 'Erreur lors de la connexion');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinExistingGame = async (code) => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom d\'abord');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.joinGame(code, playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(false);
+      onJoined(result.roomCode, result.playerId, false);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error joining game:', err);
+      setError(err.message || 'Erreur lors de la connexion');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLeaveWaitingRoom = async () => {
+    if (localRoomCode && localPlayerId) {
+      try {
+        await MultiplayerService.leaveGame(localRoomCode, localPlayerId);
+      } catch (err) {
+        console.error('Error leaving game:', err);
+      }
+    }
+    setLocalRoomCode('');
+    setLocalPlayerId('');
+    setLocalIsHost(false);
+    setStep('LOBBY');
+  };
+
+  const copyRoomCode = () => {
+    navigator.clipboard.writeText(localRoomCode);
   };
 
   if (step === 'LOBBY') {
     return (
-      <div className="min-h-screen flex flex-col items-center pt-20 px-4 bg-[#ECECEC]">
+      <div className="min-h-screen flex flex-col items-center pt-12 px-4 bg-[#ECECEC]">
         <div className="w-full max-w-4xl">
           <div className="flex items-center mb-8 relative">
             <button onClick={onBack} className="absolute left-0 p-2 hover:bg-white/50 rounded-full transition-colors"><X size={32} /></button>
             <h2 className={`text-4xl font-bold text-center w-full ${themeText} flex items-center justify-center gap-3`}>
-              {modeIcon} {modeName}
+              {mode === 'RACE' ? <Zap size={40} /> : <Users size={40} />} {modeName}
             </h2>
           </div>
+
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-sm text-red-700 font-bold text-center">
+              {error}
+            </div>
+          )}
 
           {/* Player Profile Setup */}
           <div className="mb-8 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
@@ -450,7 +939,7 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
                     <button
                       key={emoji}
                       onClick={() => setPlayerEmoji(emoji)}
-                      className={`text-3xl p-2 rounded-lg border-2 transition-all hover:scale-110 ${
+                      className={`text-2xl p-1.5 rounded-lg border-2 transition-all hover:scale-110 ${
                         playerEmoji === emoji 
                           ? 'border-blue-600 bg-blue-50 scale-110' 
                           : 'border-gray-300 hover:border-blue-400'
@@ -479,23 +968,64 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
 
           <div className="flex flex-col md:flex-row gap-8">
             {/* CREATE */}
-            <div className="flex-1 bg-white p-8 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-              <h3 className="text-2xl font-bold mb-6 flex items-center gap-2"><Plus size={28} /> Créer une partie</h3>
-              <div className="space-y-4">
-                <p className="text-gray-600">Créez votre propre salon et invitez vos amis !</p>
-                <button onClick={handleCreateGame} className={`w-full py-4 ${themeColor} text-white border-4 border-black font-bold text-2xl rounded-sm btn-shadow ${themeHover} transition-all`}>Créer le salon</button>
-              </div>
+            <div className="flex-1 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+              <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><Plus size={28} /> Créer une partie</h3>
+              <p className="text-gray-600 mb-4">Créez votre propre salon et invitez vos amis !</p>
+              <button 
+                onClick={handleCreateGame} 
+                disabled={isLoading}
+                className={`w-full py-4 ${themeColor} text-white border-4 border-black font-bold text-xl rounded-sm btn-shadow ${themeHover} transition-all disabled:opacity-50 flex items-center justify-center gap-2`}
+              >
+                {isLoading ? <Loader2 className="animate-spin" size={24} /> : null}
+                Créer le salon
+              </button>
             </div>
-            {/* JOIN */}
-            <div className="flex-1 bg-white p-8 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-              <h3 className="text-2xl font-bold mb-6 flex items-center gap-2"><LogIn size={28} /> Rejoindre</h3>
-              <div className="mb-6 space-y-3">
-                 {MOCK_LOBBIES.map(lobby => (
-                   <div key={lobby.id} className={`flex justify-between items-center p-3 border-2 border-gray-100 hover:border-black bg-gray-50 rounded-sm`}>
-                     <div><div className="font-bold">{lobby.name}</div><div className="text-xs text-gray-500">{lobby.players}/8 Joueurs</div></div>
-                     <button onClick={handleJoinGame} className="px-4 py-2 bg-white border-2 border-black text-sm font-bold rounded-sm btn-shadow-sm">Rejoindre</button>
-                   </div>
-                 ))}
+            
+            {/* JOIN BY CODE */}
+            <div className="flex-1 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+              <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><LogIn size={28} /> Rejoindre par code</h3>
+              <div className="flex gap-2 mb-4">
+                <input 
+                  type="text" 
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="CODE" 
+                  className="flex-1 p-3 border-2 border-gray-300 rounded-sm font-bold text-xl outline-none focus:border-blue-600 text-center uppercase tracking-widest" 
+                  maxLength={4}
+                />
+                <button 
+                  onClick={handleJoinGameByCode}
+                  disabled={isLoading}
+                  className={`px-6 ${themeColor} text-white border-2 border-black font-bold rounded-sm btn-shadow ${themeHover} disabled:opacity-50`}
+                >
+                  OK
+                </button>
+              </div>
+              
+              {/* Available Games List */}
+              <div className="border-t-2 border-gray-200 pt-4">
+                <p className="text-sm font-bold text-gray-500 mb-3">Parties disponibles</p>
+                {availableGames.length === 0 ? (
+                  <p className="text-center text-gray-400 py-4 italic">Aucune partie disponible</p>
+                ) : (
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {availableGames.map(game => (
+                      <div key={game.roomCode} className="flex justify-between items-center p-3 border-2 border-gray-100 hover:border-blue-400 bg-gray-50 rounded-sm transition-colors">
+                        <div>
+                          <div className="font-bold">{game.hostName}</div>
+                          <div className="text-xs text-gray-500">{game.playerCount}/{game.maxPlayers} Joueurs • {game.roomCode}</div>
+                        </div>
+                        <button 
+                          onClick={() => handleJoinExistingGame(game.roomCode)}
+                          disabled={isLoading}
+                          className="px-4 py-2 bg-white border-2 border-black text-sm font-bold rounded-sm hover:bg-blue-50 disabled:opacity-50"
+                        >
+                          Rejoindre
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -506,37 +1036,69 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
 
   // WAITING ROOM
   return (
-    <div className="min-h-screen flex flex-col items-center pt-20 px-4 bg-[#ECECEC]">
+    <div className="min-h-screen flex flex-col items-center pt-12 px-4 bg-[#ECECEC]">
       <div className="w-full max-w-4xl bg-white rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
         <div className={`${themeColor} text-white p-6 border-b-4 border-black flex justify-between items-center`}>
-           <button onClick={() => setStep('LOBBY')} className="p-2 hover:bg-white/20 rounded-full"><X size={24} /></button>
+           <button onClick={handleLeaveWaitingRoom} className="p-2 hover:bg-white/20 rounded-full" title="Quitter">
+             <X size={24} />
+           </button>
            <div className="text-center">
              <p className="text-sm font-bold uppercase opacity-80">Code de la partie</p>
-             <h2 className="text-4xl font-bold flex items-center gap-2 justify-center">{roomCode} <Copy size={20} className="opacity-70" /></h2>
+             <button 
+               onClick={copyRoomCode}
+               className="text-4xl font-bold flex items-center gap-2 justify-center hover:opacity-80 transition-opacity"
+               title="Copier le code"
+             >
+               {localRoomCode} <Copy size={20} className="opacity-70" />
+             </button>
            </div>
            <div className="w-10"></div> 
         </div>
 
         <div className="p-8">
            <h3 className="text-2xl font-bold flex items-center gap-2 mb-6"><Users size={28} /> Joueurs ({players.length}/8)</h3>
-           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
              {players.map(player => (
-               <div key={player.id} className="flex flex-col items-center p-4 bg-gray-50 border-2 border-gray-200 rounded-sm">
+               <div 
+                 key={player.id} 
+                 className={`flex flex-col items-center p-4 rounded-sm border-2 transition-all ${
+                   player.id === 'me' 
+                     ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-200' 
+                     : 'bg-gray-50 border-gray-200'
+                 }`}
+               >
                  <div className="text-5xl mb-2">{player.avatar}</div>
-                 <div className="font-bold text-lg">{player.name}</div>
+                 <div className="font-bold text-lg flex items-center gap-1">
+                   {player.name}
+                   {player.isHost && <span title="Hôte">👑</span>}
+                 </div>
+                 {player.id === 'me' && <span className="text-xs text-blue-600 font-bold">(vous)</span>}
                </div>
              ))}
-             {[...Array(8 - players.length)].map((_, i) => (
-                <div key={i} className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-sm opacity-50"><div className="text-3xl text-gray-300">?</div></div>
+             {[...Array(Math.max(0, 8 - players.length))].map((_, i) => (
+                <div key={i} className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-sm opacity-50">
+                  <div className="text-3xl text-gray-300">?</div>
+                </div>
              ))}
            </div>
+           
            <div className="flex justify-center">
-              {isHost ? (
-                <button onClick={onStartGame} className={`px-16 py-4 border-4 border-black text-2xl font-bold rounded-sm ${themeColor} text-white btn-shadow ${themeHover} flex items-center gap-3`}>
-                  <Play size={28} fill="currentColor" /> Lancer
+              {localIsHost ? (
+                <button 
+                  onClick={onStartGame} 
+                  disabled={players.length < 2 || isLoading}
+                  className={`px-12 py-4 border-4 border-black text-2xl font-bold rounded-sm ${themeColor} text-white btn-shadow ${themeHover} flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {isLoading ? <Loader2 className="animate-spin" size={28} /> : <Play size={28} fill="currentColor" />}
+                  {players.length < 2 ? 'En attente de joueurs...' : 'Lancer la partie'}
                 </button>
               ) : (
-                 <div className="text-center p-4 bg-yellow-50 border-2 border-[#FFD154] rounded-sm"><p className="text-xl font-bold text-gray-700 animate-pulse">En attente...</p></div>
+                 <div className="text-center p-4 bg-yellow-50 border-2 border-[#FFD154] rounded-sm">
+                   <p className="text-xl font-bold text-gray-700 animate-pulse flex items-center gap-2">
+                     <Loader2 className="animate-spin" size={20} />
+                     En attente de l'hôte...
+                   </p>
+                 </div>
               )}
            </div>
         </div>
@@ -545,7 +1107,22 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players }) {
   );
 }
 
-function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalRounds, isPaused, onComplete, onQuit }) {
+function DrawingScreen({ 
+  word, 
+  round, 
+  gameMode = 'CLASSIC', 
+  players = [], 
+  totalRounds, 
+  isPaused, 
+  onComplete, 
+  onQuit,
+  // Team mode props
+  roomCode = '',
+  playerId = '',
+  currentDrawerId = null,
+  gameData = null,
+  isHost = false
+}) {
   const canvasRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(ROUND_TIME);
   const [aiText, setAiText] = useState("Je ne vois rien pour l'instant...");
@@ -554,20 +1131,42 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   const [predictions, setPredictions] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [receivedDrawing, setReceivedDrawing] = useState(null);
+  const [roundFinished, setRoundFinished] = useState(false); // Prevent multiple finishRound calls
   const predictionTimerRef = useRef(null);
   const currentRoundRef = useRef(round); // Référence pour tracker le round actuel
   const isPredictingRef = useRef(false); // Flag pour tracker si une prédiction est en cours
+  const drawingSyncTimerRef = useRef(null); // Timer for syncing drawing
+  const chatUnsubscribeRef = useRef(null);
+  const lastDrawingRef = useRef(null); // Track last received drawing to avoid duplicate renders
+  const canvasInitializedRef = useRef(false); // Track if canvas was initialized;
+  
+  // Team mode detection
+  const isTeamMode = gameMode === 'TEAM' && roomCode;
+  const isDrawer = isTeamMode && currentDrawerId === playerId;
+  const isViewer = isTeamMode && currentDrawerId !== playerId;
   
   // Reset when word changes (new round)
   useEffect(() => {
     currentRoundRef.current = round; // Mettre à jour la référence du round
     isPredictingRef.current = false; // Réinitialiser le flag de prédiction
+    setRoundFinished(false); // Reset round finished flag
     setTimeLeft(ROUND_TIME);
     setAiText("Je ne vois rien pour l'instant...");
     setHasStartedDrawing(false);
     setPredictions([]);
     setChatMessages([]); // Reset chat messages
+    setChatInput('');
+    setReceivedDrawing(null);
+    lastDrawingRef.current = null; // Reset drawing ref for new round
+    canvasInitializedRef.current = false; // Allow canvas reinit for viewers
     clearCanvas();
+    
+    // Clear chat in Firebase for new round (host only or drawer)
+    if (isTeamMode && (isDrawer || isHost)) {
+      MultiplayerService.clearChat(roomCode).catch(console.error);
+    }
     
     // Annuler toute prédiction en attente
     if (predictionTimerRef.current) {
@@ -575,6 +1174,94 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
       predictionTimerRef.current = null;
     }
   }, [word]);
+
+  // Subscribe to chat messages (TEAM mode)
+  useEffect(() => {
+    if (!isTeamMode || !roomCode) return;
+    
+    console.log('💬 Subscribing to chat for room:', roomCode);
+    
+    const unsubscribe = MultiplayerService.subscribeToChat(roomCode, (messages) => {
+      console.log('📨 Chat messages received:', messages.length);
+      setChatMessages(messages || []);
+    });
+    
+    chatUnsubscribeRef.current = unsubscribe;
+    
+    return () => {
+      if (chatUnsubscribeRef.current) {
+        chatUnsubscribeRef.current();
+        chatUnsubscribeRef.current = null;
+      }
+    };
+  }, [isTeamMode, roomCode]);
+
+  // Subscribe to drawing updates (TEAM mode - viewers only)
+  useEffect(() => {
+    // For TEAM mode, non-drawers need to subscribe to drawing updates
+    const shouldSubscribe = isTeamMode && currentDrawerId && currentDrawerId !== playerId && roomCode;
+    
+    if (!shouldSubscribe) {
+      console.log('📺 Not subscribing to drawing (isTeamMode:', isTeamMode, 'currentDrawerId:', currentDrawerId, 'playerId:', playerId, ')');
+      return;
+    }
+    
+    console.log('🖼️ Viewer subscribing to drawing updates for room:', roomCode);
+    
+    // Use dedicated drawing subscription (listens only to currentDrawing path)
+    const unsubscribe = MultiplayerService.subscribeToDrawing(roomCode, (drawingData) => {
+      console.log('📡 Viewer received drawing update, has data:', !!drawingData);
+      
+      if (drawingData && drawingData !== lastDrawingRef.current) {
+        console.log('🎨 New drawing data received, length:', drawingData.length);
+        lastDrawingRef.current = drawingData;
+        setReceivedDrawing(drawingData);
+        
+        // Draw received image on canvas
+        if (canvasRef.current) {
+          const img = new Image();
+          img.onload = () => {
+            console.log('🖌️ Drawing image on canvas, size:', img.width, 'x', img.height);
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            // Clear canvas with white
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw image to fill the canvas (the sender's canvas is same size)
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            console.log('✅ Image drawn on viewer canvas');
+          };
+          img.onerror = (e) => {
+            console.error('❌ Error loading drawing image:', e);
+          };
+          img.src = drawingData;
+        }
+      }
+    });
+    
+    return () => unsubscribe();
+  }, [isTeamMode, roomCode, currentDrawerId, playerId]);
+
+  // Check for round end (TEAM mode)
+  useEffect(() => {
+    if (!isTeamMode || roundFinished) return;
+    
+    // Round ended by correct guess
+    if (gameData?.roundStatus === 'finished' && gameData?.roundWinner) {
+      // Verify we're still in the same round
+      if (gameData.currentRound !== currentRoundRef.current) {
+        console.log('⚠️ Round end ignored - round mismatch', gameData.currentRound, 'vs', currentRoundRef.current);
+        return;
+      }
+      console.log('🏆 Round ended! Winner:', gameData.roundWinner, 'Round:', gameData.currentRound);
+      const winnerType = gameData.roundWinnerType === 'ai' ? 'AI' : 'TEAM';
+      setRoundFinished(true);
+      finishRound(winnerType !== 'AI', winnerType);
+    }
+  }, [gameData?.roundStatus, gameData?.roundWinner, gameData?.currentRound, isTeamMode, roundFinished]);
 
   // Timer Logic
   useEffect(() => {
@@ -591,53 +1278,94 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
     return () => clearInterval(timer);
   }, [timeLeft, isPaused, showQuitConfirm]);
 
-  // AI & Team Guessing Logic - Based on real predictions
+  // AI & Team Guessing Logic - Based on real predictions (DRAWER ONLY in TEAM mode)
   useEffect(() => {
     if (!hasStartedDrawing || isPaused || showQuitConfirm || predictions.length === 0) return;
+    
+    // In TEAM mode, only the drawer runs AI predictions
+    if (isTeamMode && !isDrawer) return;
 
     // Use real predictions from the model
     const topPrediction = predictions[0]; // Meilleure prédiction
     const targetEnglish = FRENCH_TO_ENGLISH[word];
 
-    if (gameMode === 'TEAM') {
-      // In Team Mode, AI sends best prediction to chat
+    if (isTeamMode && isDrawer) {
+      // In Team Mode with Firebase, AI sends guesses via Firebase
+      const aiGuess = topPrediction.categoryFr;
+      
+      // Check if AI already sent this guess (check Firebase messages)
+      const hasAlreadySentThisGuess = chatMessages.some(
+        msg => msg.playerId === 'AI' && msg.message === aiGuess && !msg.isCorrect
+      );
+      
+      if (!hasAlreadySentThisGuess && topPrediction.confidence >= 0.15) {
+        // Send AI guess to Firebase chat
+        MultiplayerService.sendChatMessage(roomCode, 'AI', '🤖 IA', aiGuess, false)
+          .catch(console.error);
+        
+        // Check if AI wins (correct prediction with enough confidence)
+        if (topPrediction.category === targetEnglish && topPrediction.confidence >= 0.25) {
+          console.log('🤖 AI guessed correctly!');
+          MultiplayerService.aiGuessedCorrectly(roomCode)
+            .catch(console.error);
+        }
+      }
+    } else if (gameMode === 'TEAM' && !isTeamMode) {
+      // Local Team mode (fallback for single player test) - old logic
       const confidence = Math.round(topPrediction.confidence * 100);
       const aiGuess = topPrediction.categoryFr;
       
-      // AI sends its guess to chat (only once per prediction - check all AI messages)
       const hasAlreadySentThisGuess = chatMessages.some(
         msg => msg.sender === 'AI' && msg.text === aiGuess && !msg.isCorrect
       );
       
       if (!hasAlreadySentThisGuess) {
-        addChatMessage('AI', aiGuess);
+        addLocalChatMessage('AI', aiGuess);
         
-        // Check if AI wins (correct prediction with enough confidence)
         if (topPrediction.category === targetEnglish && topPrediction.confidence >= 0.25) {
-          addChatMessage('AI', word, true);
-          finishRound(false, 'AI'); // Team loses, AI wins
-        }
-      }
-
-      // 2. Teammates Logic (Only Team Mode) - Still use wrong guesses
-      if (Math.random() > 0.7) {
-        const teammate = players.filter(p => p.id !== 'me')[Math.floor(Math.random() * (players.length - 1))];
-        if (teammate) {
-           const wrongGuess = WRONG_GUESSES[Math.floor(Math.random() * WRONG_GUESSES.length)];
-           addChatMessage(teammate.name, wrongGuess);
-           
-           // Small chance Teammate wins (they guess correctly)
-           if (Math.random() > 0.95) {
-             addChatMessage(teammate.name, word, true);
-             finishRound(true, 'TEAM'); // Team wins
-           }
+          addLocalChatMessage('AI', word, true);
+          finishRound(false, 'AI');
         }
       }
     }
-  }, [predictions, hasStartedDrawing, isPaused, showQuitConfirm, gameMode, word, players, chatMessages]);
+  }, [predictions, hasStartedDrawing, isPaused, showQuitConfirm, gameMode, word, players, chatMessages, isTeamMode, isDrawer, roomCode]);
 
-  const addChatMessage = (sender, text, isCorrect = false) => {
+  // Local chat message (for non-Firebase mode)
+  const addLocalChatMessage = (sender, text, isCorrect = false) => {
     setChatMessages(prev => [...prev, { id: Date.now() + Math.random(), sender, text, isCorrect }]);
+  };
+  
+  // Send chat message (for TEAM mode guessers)
+  const handleSendChatMessage = async () => {
+    if (!chatInput.trim() || !isTeamMode || isDrawer) return;
+    
+    const message = chatInput.trim();
+    const myPlayer = players.find(p => p.id === 'me');
+    const playerName = myPlayer?.name || 'Joueur';
+    
+    // Check if correct guess
+    const isCorrect = message.toLowerCase() === word.toLowerCase();
+    
+    setChatInput('');
+    
+    try {
+      await MultiplayerService.sendChatMessage(roomCode, playerId, playerName, message, isCorrect);
+      
+      if (isCorrect) {
+        console.log('🎉 You guessed correctly!');
+        // The round end is handled by Firebase listener
+      }
+    } catch (error) {
+      console.error('Error sending chat message:', error);
+    }
+  };
+  
+  // Handle Enter key in chat
+  const handleChatKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendChatMessage();
+    }
   };
 
   // Fonction pour calculer la bounding box du dessin
@@ -852,6 +1580,10 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
         
         const targetEnglish = FRENCH_TO_ENGLISH[word];
         
+        // Debug: afficher les valeurs pour comprendre le problème
+        console.log('🔍 Debug - word:', word, '→ targetEnglish:', targetEnglish);
+        console.log('🔍 Debug - categories reçues:', predArray.map(p => p.category));
+        
         // Vérifier si le mot cible est dans le top 3
         const isInTop3 = predArray.some(pred => pred.category === targetEnglish);
         const targetPrediction = predArray.find(pred => pred.category === targetEnglish);
@@ -860,13 +1592,24 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
           const targetConfidence = Math.round(targetPrediction.confidence * 100);
           const position = predArray.findIndex(pred => pred.category === targetEnglish) + 1;
           console.log(`🎯 ${targetEnglish} trouvé en position ${position} avec ${targetConfidence}%`);
+        } else {
+          console.log(`❌ ${targetEnglish} PAS trouvé dans le top 3`);
         }
         
         // Gagner si le mot cible est dans le top 3 avec confiance >= 25%
-        if (isInTop3 && targetPrediction.confidence >= 0.25) {
+        // En mode TEAM, ne PAS appeler finishRound ici - c'est géré par aiGuessedCorrectly et le useEffect
+        if (isInTop3 && targetPrediction && targetPrediction.confidence >= 0.25 && !isTeamMode) {
           console.log('✅ BONNE RÉPONSE! (Top 3)');
           isPredictingRef.current = false; // Libérer le flag avant de finir le round
-          setTimeout(() => finishRound(true), 500);
+          const capturedRound = currentRoundRef.current;
+          setTimeout(() => {
+            // Ne finir que si on est toujours dans le même round
+            if (currentRoundRef.current === capturedRound) {
+              finishRound(true);
+            } else {
+              console.log('⚠️ setTimeout finishRound ignoré - round changé');
+            }
+          }, 500);
           return; // Sortir immédiatement
         }
       }
@@ -882,6 +1625,10 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
   // (pas d'interval automatique pour éviter le rate limiting)
 
   const finishRound = (success, winner = null) => {
+    // Prevent multiple calls
+    if (roundFinished) return;
+    setRoundFinished(true);
+    
     // Get top prediction confidence for scoring
     const topConfidence = predictions.length > 0 ? predictions[0].confidence : 0;
     
@@ -935,7 +1682,8 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
   };
 
   const startDraw = (e) => {
-    if (isPaused || showQuitConfirm) return;
+    // Block drawing for viewers in TEAM mode
+    if (isPaused || showQuitConfirm || isViewer) return;
     e.preventDefault();
     const { x, y } = getCoordinates(e);
     const ctx = canvasRef.current.getContext('2d');
@@ -947,7 +1695,8 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
   };
 
   const draw = (e) => {
-    if (!isDrawing || isPaused || showQuitConfirm) return;
+    // Block drawing for viewers in TEAM mode
+    if (!isDrawing || isPaused || showQuitConfirm || isViewer) return;
     e.preventDefault();
     
     const canvas = canvasRef.current;
@@ -966,15 +1715,47 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
     }
     predictionTimerRef.current = setTimeout(() => {
       makePrediction();
+      
+      // Sync drawing to Firebase (TEAM mode drawer)
+      if (isTeamMode && isDrawer) {
+        syncDrawingToFirebase();
+      }
     }, 500);
   };
 
   const stopDraw = () => {
     setIsDrawing(false);
     // Faire une prédiction immédiate quand on arrête de dessiner
-    if (hasStartedDrawing && !isPaused && !showQuitConfirm) {
-      setTimeout(() => makePrediction(), 100);
+    if (hasStartedDrawing && !isPaused && !showQuitConfirm && !isViewer) {
+      setTimeout(() => {
+        makePrediction();
+        // Sync drawing when stopping (TEAM mode drawer)
+        if (isTeamMode && isDrawer) {
+          syncDrawingToFirebase();
+        }
+      }, 100);
     }
+  };
+
+  // Sync drawing to Firebase (TEAM mode)
+  const syncDrawingToFirebase = () => {
+    if (!canvasRef.current || !roomCode) return;
+    
+    // Throttle syncing to avoid too many updates
+    if (drawingSyncTimerRef.current) {
+      clearTimeout(drawingSyncTimerRef.current);
+    }
+    
+    drawingSyncTimerRef.current = setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const dataUrl = canvas.toDataURL('image/png', 0.5); // Compress for faster sync
+      console.log('📤 Syncing drawing to Firebase, length:', dataUrl.length);
+      MultiplayerService.updateDrawingData(roomCode, dataUrl)
+        .then(() => console.log('✅ Drawing synced'))
+        .catch(err => console.error('❌ Error syncing drawing:', err));
+    }, 100);
   };
 
   const clearCanvas = () => {
@@ -993,8 +1774,25 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
+    // Determine if this player is a viewer (not the drawer in TEAM mode)
+    const isCurrentViewer = isTeamMode && currentDrawerId && currentDrawerId !== playerId;
+    
+    // For viewers, just set the size once - don't clear
+    if (isCurrentViewer) {
+      if (!canvasInitializedRef.current) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        canvasInitializedRef.current = true;
+        console.log('📐 Viewer canvas initialized:', canvas.width, 'x', canvas.height);
+      }
+      return; // Don't add resize listener for viewers
+    }
 
-    // Taille plein écran
+    // Taille plein écran (drawer only)
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
@@ -1008,7 +1806,7 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Resize handler
+    // Resize handler (drawer only)
     const handleResize = () => {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       canvas.width = window.innerWidth;
@@ -1024,7 +1822,7 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [isTeamMode, currentDrawerId, playerId, round]); // Re-run when drawer changes or when round changes
 
   return (
     <div className="flex h-screen bg-white overflow-hidden">
@@ -1087,7 +1885,20 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
         {/* Header */}
         <div className="flex justify-between items-center px-4 py-3 bg-[#ECECEC] z-10 shrink-0 border-b border-gray-200">
           <div className="text-lg md:text-xl">
-            {gameMode === 'TEAM' ? (
+            {isTeamMode ? (
+              // Team mode with Firebase
+              <>
+                <span className="text-blue-600 font-bold">👥 Équipe {players.reduce((sum, p) => sum + (p.score || 0), 0)}</span>
+                <span className="mx-2">vs</span>
+                <span className="text-red-600 font-bold">🤖 IA {chatMessages.filter(m => m.isCorrect && m.playerId === 'AI').length * 100}</span>
+                {isDrawer && (
+                  <span className="ml-4 text-purple-600 font-bold">
+                    Dessinez : <span className="capitalize">{word}</span>
+                  </span>
+                )}
+              </>
+            ) : gameMode === 'TEAM' ? (
+              // Local team mode (fallback)
               <>
                 <span className="text-blue-600 font-bold">Team {players.filter(p => p.id === 'me').length > 0 ? players.filter(p => p.id !== 'me').reduce((sum, p) => sum + p.score, 0) : 0}</span>
                 <span className="mx-2">vs</span>
@@ -1106,10 +1917,10 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
         </div>
 
         {/* Main Drawing Area */}
-        <div className="flex-1 relative bg-white cursor-crosshair overflow-hidden">
+        <div className={`flex-1 relative bg-white overflow-hidden ${isViewer ? 'cursor-default' : 'cursor-crosshair'}`}>
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 touch-none"
+            className={`absolute inset-0 touch-none ${isViewer ? 'pointer-events-none' : ''}`}
             onMouseDown={startDraw}
             onMouseMove={draw}
             onMouseUp={stopDraw}
@@ -1118,6 +1929,15 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
             onTouchMove={draw}
             onTouchEnd={stopDraw}
           />
+          
+          {/* Viewer overlay - show who is drawing */}
+          {isViewer && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-purple-100 border-2 border-purple-300 px-4 py-2 rounded-full shadow-lg z-10">
+              <span className="text-purple-700 font-bold">
+                {players.find(p => p.id === currentDrawerId || (currentDrawerId === playerId && p.id === 'me'))?.name || 'Un joueur'} dessine...
+              </span>
+            </div>
+          )}
           
           {/* AI Voice Overlay with Predictions - Only for Classic/Race modes */}
           {gameMode !== 'TEAM' && (
@@ -1155,14 +1975,19 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
 
         {/* Footer Controls */}
         <div className="bg-[#ECECEC] px-4 py-2 flex justify-between items-center border-t border-gray-200 shrink-0">
-          <button 
-              onClick={clearCanvas} 
-              className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group" 
-              title="Effacer"
-          >
-            <Trash2 size={24} className="text-gray-600 group-hover:text-black" />
-            <span className="text-xs font-bold text-gray-500 group-hover:text-black">Effacer</span>
-          </button>
+          {/* Clear button - only for drawer or non-team modes */}
+          {!isViewer ? (
+            <button 
+                onClick={clearCanvas} 
+                className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group" 
+                title="Effacer"
+            >
+              <Trash2 size={24} className="text-gray-600 group-hover:text-black" />
+              <span className="text-xs font-bold text-gray-500 group-hover:text-black">Effacer</span>
+            </button>
+          ) : (
+            <div className="w-16"></div>
+          )}
           
           <div className="flex gap-4">
                {/* Skip Button - Masqué en mode Race et Team */}
@@ -1192,28 +2017,66 @@ function DrawingScreen({ word, round, gameMode = 'CLASSIC', players = [], totalR
         <div className="w-80 bg-gray-50 border-l-2 border-gray-200 flex flex-col z-20 shadow-lg shrink-0">
            <div className="p-3 bg-white border-b-2 border-gray-100 font-bold text-gray-500 flex items-center gap-2">
              <MessageSquare size={18} /> Chat de l'équipe
+             {isDrawer && <span className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded-full ml-auto">Vous dessinez</span>}
            </div>
            <div className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col-reverse scrollbar-hide">
               {/* Messages reversed to start from bottom */}
-              {[...chatMessages].reverse().map(msg => (
-                <div key={msg.id} className={`flex flex-col animate-in slide-in-from-bottom-2 ${msg.sender === 'AI' ? 'items-end' : 'items-start'}`}>
-                  <div className="text-xs text-gray-400 mb-1 font-bold">{msg.sender === 'AI' ? '🤖 IA' : msg.sender}</div>
-                  <div className={`px-3 py-2 rounded-lg max-w-[90%] text-sm font-medium shadow-sm border 
-                      ${msg.isCorrect 
-                         ? 'bg-green-500 text-white border-green-600 scale-110 origin-bottom' 
-                         : (msg.sender === 'AI' ? 'bg-red-50 text-red-900 border-red-100' : 'bg-white text-gray-800 border-gray-200')}
-                  `}>
-                     {msg.isCorrect ? `★ ${msg.text.toUpperCase()} !` : msg.text}
+              {[...chatMessages].reverse().map(msg => {
+                // Support both Firebase format (playerId, playerName, message) and local format (sender, text)
+                const isAI = msg.playerId === 'AI' || msg.sender === 'AI';
+                const senderName = msg.playerName || msg.sender || 'Joueur';
+                const messageText = msg.message || msg.text || '';
+                const isMe = msg.playerId === playerId;
+                
+                return (
+                  <div key={msg.id} className={`flex flex-col animate-in slide-in-from-bottom-2 ${isAI ? 'items-end' : isMe ? 'items-end' : 'items-start'}`}>
+                    <div className="text-xs text-gray-400 mb-1 font-bold">
+                      {isAI ? '🤖 IA' : isMe ? '✨ Vous' : senderName}
+                    </div>
+                    <div className={`px-3 py-2 rounded-lg max-w-[90%] text-sm font-medium shadow-sm border 
+                        ${msg.isCorrect 
+                           ? 'bg-green-500 text-white border-green-600 scale-110 origin-bottom' 
+                           : isAI 
+                             ? 'bg-red-50 text-red-900 border-red-100' 
+                             : isMe 
+                               ? 'bg-blue-50 text-blue-900 border-blue-100'
+                               : 'bg-white text-gray-800 border-gray-200'}
+                    `}>
+                       {msg.isCorrect ? `★ ${messageText.toUpperCase()} !` : messageText}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {chatMessages.length === 0 && <div className="text-center text-gray-300 italic mt-10">La partie commence...</div>}
            </div>
            <div className="p-3 bg-white border-t-2 border-gray-200">
-             <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-2 opacity-50 cursor-not-allowed">
-                <input type="text" disabled placeholder="Vous dessinez..." className="bg-transparent flex-1 outline-none text-sm" />
-                <Send size={16} />
-             </div>
+             {isDrawer ? (
+               // Drawer can't chat
+               <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-2 opacity-50 cursor-not-allowed">
+                 <input type="text" disabled placeholder="Vous dessinez..." className="bg-transparent flex-1 outline-none text-sm" />
+                 <Send size={16} />
+               </div>
+             ) : (
+               // Guessers can send messages
+               <div className="flex items-center gap-2 bg-white border-2 border-gray-200 rounded-full px-3 py-2 focus-within:border-blue-400 transition-colors">
+                 <input 
+                   type="text" 
+                   value={chatInput}
+                   onChange={(e) => setChatInput(e.target.value)}
+                   onKeyPress={handleChatKeyPress}
+                   placeholder="Proposez une réponse..." 
+                   className="bg-transparent flex-1 outline-none text-sm"
+                   autoComplete="off"
+                 />
+                 <button 
+                   onClick={handleSendChatMessage}
+                   disabled={!chatInput.trim()}
+                   className={`p-1 rounded-full transition-colors ${chatInput.trim() ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-300'}`}
+                 >
+                   <Send size={18} />
+                 </button>
+               </div>
+             )}
            </div>
         </div>
       )}

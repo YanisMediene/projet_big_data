@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { ref, onValue } from 'firebase/database';
 import './Multiplayer.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -9,10 +10,12 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 function GameLobby() {
   const { currentUser } = useAuth();
   const [lobbies, setLobbies] = useState([]);
+  const [lobbyPresence, setLobbyPresence] = useState({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [gameType, setGameType] = useState('race');
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // Listen to available lobbies in Firestore
   useEffect(() => {
@@ -27,18 +30,67 @@ function GameLobby() {
         lobbyList.push({ id: doc.id, ...doc.data() });
       });
       setLobbies(lobbyList);
+    }, (err) => {
+      console.error('Error fetching lobbies:', err);
+      setError('Erreur de connexion aux salons');
     });
 
     return () => unsubscribe();
   }, []);
 
+  // Listen to presence for all lobbies
+  useEffect(() => {
+    if (lobbies.length === 0) return;
+
+    const unsubscribes = [];
+
+    lobbies.forEach((lobby) => {
+      const presenceRef = ref(rtdb, `presence/${lobby.id}`);
+      const unsubscribe = onValue(presenceRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        const onlineCount = Object.values(data).filter(p => p.online).length;
+        
+        setLobbyPresence(prev => ({
+          ...prev,
+          [lobby.id]: {
+            data,
+            onlineCount
+          }
+        }));
+      });
+      unsubscribes.push(() => unsubscribe());
+    });
+
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [lobbies]);
+
+  const getOnlineIndicator = (lobby) => {
+    const presence = lobbyPresence[lobby.id];
+    if (!presence) return null;
+    
+    const onlineCount = presence.onlineCount;
+    const totalPlayers = lobby.players?.length || 0;
+    
+    if (onlineCount === totalPlayers && onlineCount > 0) {
+      return <span className="online-indicator all-online">🟢 {onlineCount} en ligne</span>;
+    } else if (onlineCount > 0) {
+      return <span className="online-indicator some-online">🟡 {onlineCount}/{totalPlayers} en ligne</span>;
+    } else {
+      return <span className="online-indicator none-online">🔴 Aucun en ligne</span>;
+    }
+  };
+
   const handleCreateGame = async () => {
     if (!currentUser) {
-      alert('Vous devez être connecté pour créer une partie');
+      setError('Vous devez être connecté pour créer une partie');
       return;
     }
 
     setLoading(true);
+    setError(null);
+    
     try {
       const endpoint = gameType === 'race' ? 'race' : 'guessing';
       const response = await fetch(`${API_URL}/games/${endpoint}/create`, {
@@ -55,7 +107,8 @@ function GameLobby() {
       });
 
       if (!response.ok) {
-        throw new Error('Erreur lors de la création de la partie');
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Erreur lors de la création de la partie');
       }
 
       const data = await response.json();
@@ -64,7 +117,7 @@ function GameLobby() {
       window.location.href = `/multiplayer/${roomPath}/${data.game_id}`;
     } catch (error) {
       console.error('Error creating game:', error);
-      alert('Erreur lors de la création de la partie');
+      setError(error.message);
     } finally {
       setLoading(false);
     }
@@ -72,9 +125,12 @@ function GameLobby() {
 
   const handleJoinGame = async (gameId, gameType) => {
     if (!currentUser) {
-      alert('Vous devez être connecté pour rejoindre une partie');
+      setError('Vous devez être connecté pour rejoindre une partie');
       return;
     }
+
+    setLoading(true);
+    setError(null);
 
     try {
       const endpoint = gameType === 'race' ? 'race' : 'guessing';
@@ -100,8 +156,57 @@ function GameLobby() {
       window.location.href = `/multiplayer/${roomPath}/${gameId}`;
     } catch (error) {
       console.error('Error joining game:', error);
-      alert(error.message);
+      setError(error.message);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const renderLobbyCard = (lobby) => {
+    const presence = lobbyPresence[lobby.id];
+    
+    return (
+      <div key={lobby.id} className="lobby-card">
+        <div className="lobby-info">
+          <h3>Partie de {lobby.players[0]?.player_name}</h3>
+          <div className="lobby-details">
+            <span className="player-count">
+              👥 {lobby.players.length}/{lobby.max_players} joueurs
+            </span>
+            <span className="round-count">
+              🎯 {lobby.max_rounds} rounds
+            </span>
+            {getOnlineIndicator(lobby)}
+          </div>
+          <div className="players-preview">
+            {lobby.players.map((p, i) => {
+              const isOnline = presence?.data?.[p.player_id]?.online;
+              return (
+                <span 
+                  key={i} 
+                  className={`player-badge ${isOnline ? 'online' : 'offline'}`}
+                  title={isOnline ? 'En ligne' : 'Hors ligne'}
+                >
+                  {isOnline && <span className="status-dot">●</span>}
+                  {p.player_name}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        <button
+          className="join-btn"
+          onClick={() => handleJoinGame(lobby.id, lobby.game_type)}
+          disabled={lobby.players.length >= lobby.max_players || loading}
+        >
+          {lobby.players.length >= lobby.max_players
+            ? '🔒 Pleine'
+            : loading 
+            ? '⏳ Connexion...'
+            : '🚀 Rejoindre'}
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -111,11 +216,24 @@ function GameLobby() {
         <button
           className="create-game-btn"
           onClick={() => setShowCreateModal(true)}
-          disabled={!currentUser}
+          disabled={!currentUser || loading}
         >
           ➕ Créer une partie
         </button>
       </div>
+
+      {error && (
+        <div className="error-banner">
+          ⚠️ {error}
+          <button onClick={() => setError(null)}>✕</button>
+        </div>
+      )}
+
+      {!currentUser && (
+        <div className="login-prompt">
+          <p>🔐 Connectez-vous pour créer ou rejoindre une partie</p>
+        </div>
+      )}
 
       <div className="lobby-grid">
         <div className="lobby-section">
@@ -132,37 +250,7 @@ function GameLobby() {
             </div>
           ) : (
             <div className="lobbies-list">
-              {lobbies.filter(l => l.game_type === 'race').map((lobby) => (
-                <div key={lobby.id} className="lobby-card">
-                  <div className="lobby-info">
-                    <h3>Partie de {lobby.players[0]?.player_name}</h3>
-                    <div className="lobby-details">
-                      <span className="player-count">
-                        👥 {lobby.players.length}/{lobby.max_players} joueurs
-                      </span>
-                      <span className="round-count">
-                        🎯 {lobby.max_rounds} rounds
-                      </span>
-                    </div>
-                    <div className="players-preview">
-                      {lobby.players.map((p, i) => (
-                        <span key={i} className="player-badge">
-                          {p.player_name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    className="join-btn"
-                    onClick={() => handleJoinGame(lobby.id, lobby.game_type)}
-                    disabled={lobby.players.length >= lobby.max_players}
-                  >
-                    {lobby.players.length >= lobby.max_players
-                      ? '🔒 Pleine'
-                      : '🚀 Rejoindre'}
-                  </button>
-                </div>
-              ))}
+              {lobbies.filter(l => l.game_type === 'race').map(renderLobbyCard)}
             </div>
           )}
         </div>
@@ -181,37 +269,7 @@ function GameLobby() {
             </div>
           ) : (
             <div className="lobbies-list">
-              {lobbies.filter(l => l.game_type === 'guessing').map((lobby) => (
-                <div key={lobby.id} className="lobby-card">
-                  <div className="lobby-info">
-                    <h3>Partie de {lobby.players[0]?.player_name}</h3>
-                    <div className="lobby-details">
-                      <span className="player-count">
-                        👥 {lobby.players.length}/{lobby.max_players} joueurs
-                      </span>
-                      <span className="round-count">
-                        🎯 {lobby.max_rounds} rounds
-                      </span>
-                    </div>
-                    <div className="players-preview">
-                      {lobby.players.map((p, i) => (
-                        <span key={i} className="player-badge">
-                          {p.player_name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    className="join-btn"
-                    onClick={() => handleJoinGame(lobby.id, lobby.game_type)}
-                    disabled={lobby.players.length >= lobby.max_players}
-                  >
-                    {lobby.players.length >= lobby.max_players
-                      ? '🔒 Pleine'
-                      : '🚀 Rejoindre'}
-                  </button>
-                </div>
-              ))}
+              {lobbies.filter(l => l.game_type === 'guessing').map(renderLobbyCard)}
             </div>
           )}
         </div>

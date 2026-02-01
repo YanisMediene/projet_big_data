@@ -169,3 +169,91 @@ async def admin_health():
             )
         ),
     }
+
+
+# ==================== GAME CLEANUP ENDPOINTS ====================
+
+
+@router.post("/cleanup/abandoned-games")
+async def cleanup_abandoned_games(
+    max_age_minutes: int = 30, authorized: bool = Depends(verify_admin_token)
+):
+    """
+    Clean up games that have been waiting/abandoned for too long
+
+    **Security**: Requires admin API key
+    **Usage**: Called by Cloud Scheduler or manually
+
+    Args:
+        max_age_minutes: Games older than this will be deleted (default: 30)
+    """
+    from services.presence_service import GameCleanupService
+
+    result = await GameCleanupService.cleanup_abandoned_games(max_age_minutes)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    logger.info(f"Abandoned games cleanup: {result}")
+    return result
+
+
+@router.post("/cleanup/sync-presence/{game_id}")
+async def sync_presence_to_firestore(
+    game_id: str, authorized: bool = Depends(verify_admin_token)
+):
+    """
+    Sync RTDB presence data to Firestore for a specific game
+    Removes players from Firestore who are not present in RTDB
+
+    **Security**: Requires admin API key
+    """
+    from services.presence_service import GameCleanupService
+
+    result = await GameCleanupService.sync_presence_to_firestore(game_id)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return result
+
+
+@router.delete("/games/{game_id}")
+async def delete_game(game_id: str, authorized: bool = Depends(verify_admin_token)):
+    """
+    Force delete a game and all associated data
+
+    **Security**: Requires admin API key
+    **Use case**: Manual cleanup of problematic games
+    """
+    from firebase_admin import firestore as fb_firestore
+    from services.presence_service import PresenceService
+
+    try:
+        db = fb_firestore.client()
+
+        # Delete game document
+        game_ref = db.collection("games").document(game_id)
+        game_ref.delete()
+
+        # Delete chat subcollection
+        chat_docs = db.collection("games").document(game_id).collection("chat").stream()
+        for doc in chat_docs:
+            doc.reference.delete()
+
+        # Delete turns subcollection
+        turns_docs = (
+            db.collection("games").document(game_id).collection("turns").stream()
+        )
+        for doc in turns_docs:
+            doc.reference.delete()
+
+        # Clean up RTDB presence
+        await PresenceService.cleanup_game_presence(game_id)
+
+        logger.info(f"Game {game_id} force deleted by admin")
+        return {"status": "deleted", "game_id": game_id}
+
+    except Exception as e:
+        logger.error(f"Error deleting game: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

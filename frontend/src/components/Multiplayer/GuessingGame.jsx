@@ -1,16 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
 import { doc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
+import { ref, onValue } from 'firebase/database';
 import DrawingCanvas from '../DrawingCanvas';
 import { trackGameStarted } from '../../services/analytics';
+import { usePresence, useLeaveGame } from '../../hooks/usePresence';
 import './Multiplayer.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 function GuessingGame() {
   const { gameId } = useParams();
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
   
   const [game, setGame] = useState(null);
@@ -23,11 +26,37 @@ function GuessingGame() {
   const [canvasImage, setCanvasImage] = useState(null);
   const [roundNotification, setRoundNotification] = useState(null);
   const [viewerCanvasImage, setViewerCanvasImage] = useState(null);
+  const [presence, setPresence] = useState({});
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
   
   const chatEndRef = useRef(null);
   const previousRoundRef = useRef(null);
   const canvasRef = useRef(null);
   const viewerCanvasRef = useRef(null);
+
+  // Determine player name for presence
+  const playerName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Joueur';
+
+  // Initialize presence system
+  usePresence(gameId, currentUser?.uid, playerName, !!currentUser && !!gameId);
+  const { leaveGame, isLeaving: leaveInProgress } = useLeaveGame('guessing');
+
+  // Listen to presence updates
+  useEffect(() => {
+    if (!gameId) return;
+
+    const presenceRef = ref(rtdb, `presence/${gameId}`);
+    const unsubscribe = onValue(presenceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setPresence(snapshot.val());
+      } else {
+        setPresence({});
+      }
+    });
+
+    return () => unsubscribe();
+  }, [gameId]);
 
   // Listen to game updates
   useEffect(() => {
@@ -308,8 +337,72 @@ function GuessingGame() {
     : 0;
   const aiWinning = highestAiConfidence >= (game.settings.ai_confidence_threshold || 0.85);
 
+  // Check if a player is online
+  const isPlayerOnline = (playerId) => {
+    const playerPresence = presence[playerId];
+    if (!playerPresence) return false;
+    const lastSeen = playerPresence.lastSeen || 0;
+    const threshold = 30000; // 30 seconds
+    return playerPresence.online && (Date.now() - lastSeen < threshold);
+  };
+
+  // Handle leaving the game
+  const handleLeaveGame = async () => {
+    setIsLeaving(true);
+    try {
+      const result = await leaveGame(gameId, currentUser?.uid);
+      if (result.success) {
+        navigate('/multiplayer');
+      } else {
+        alert(result.error || 'Erreur lors de la sortie de la partie');
+      }
+    } catch (error) {
+      console.error('Error leaving game:', error);
+      alert('Erreur lors de la sortie de la partie');
+    } finally {
+      setIsLeaving(false);
+      setShowLeaveModal(false);
+    }
+  };
+
   return (
     <div className="guessing-game">
+      {/* Leave confirmation modal */}
+      {showLeaveModal && (
+        <div className="modal-overlay">
+          <div className="modal-content leave-modal">
+            <h3>⚠️ Quitter la partie ?</h3>
+            <p>Êtes-vous sûr de vouloir quitter cette partie ?</p>
+            {isCreator && game.players.length > 1 && (
+              <p className="warning-text">
+                En tant qu'hôte, un autre joueur deviendra le nouvel hôte.
+              </p>
+            )}
+            {isDrawer && game.status === 'playing' && (
+              <p className="warning-text">
+                Vous êtes le dessinateur actuel. Un autre joueur sera sélectionné.
+              </p>
+            )}
+            <div className="modal-actions">
+              <button 
+                className="cancel-btn" 
+                onClick={() => setShowLeaveModal(false)}
+                disabled={isLeaving || leaveInProgress}
+              >
+                Annuler
+              </button>
+              <button 
+                className="confirm-leave-btn" 
+                onClick={handleLeaveGame}
+                disabled={isLeaving || leaveInProgress}
+              >
+                {isLeaving || leaveInProgress ? 'Sortie...' : 'Quitter'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Round notification */}
       {roundNotification && (
         <div className="round-notification">
@@ -353,6 +446,15 @@ function GuessingGame() {
             <span className="team-label">🤖 IA</span>
             <span className="score-value">{game.team_ai.rounds_won}</span>
           </div>
+          {game.status !== 'finished' && (
+            <button 
+              className="leave-game-btn"
+              onClick={() => setShowLeaveModal(true)}
+              title="Quitter la partie"
+            >
+              🚪 Quitter
+            </button>
+          )}
         </div>
       </div>
 
@@ -365,12 +467,16 @@ function GuessingGame() {
             {game.players.map((player) => (
               <div
                 key={player.player_id}
-                className={`player-card ${player.player_id === game.current_drawer?.player_id ? 'is-drawer' : ''}`}
+                className={`player-card ${player.player_id === game.current_drawer?.player_id ? 'is-drawer' : ''} ${!isPlayerOnline(player.player_id) ? 'player-offline' : ''}`}
               >
                 <div className="player-name">
+                  <span className={`presence-dot ${isPlayerOnline(player.player_id) ? 'online' : 'offline'}`}></span>
                   {player.player_name}
                   {player.player_id === game.current_drawer?.player_id && (
                     <span className="drawer-icon">✏️</span>
+                  )}
+                  {player.player_id === game.creator_id && (
+                    <span className="host-badge">👑</span>
                   )}
                 </div>
                 <div className="player-stats">

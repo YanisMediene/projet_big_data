@@ -58,20 +58,40 @@ model = None
 try:
     cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "./serviceAccountKey.json")
 
-    # Check if we should use emulator
+    # Check if we should use emulators
     use_emulator = os.getenv("USE_FIRESTORE_EMULATOR", "false").lower() == "true"
+    use_rtdb_emulator = os.getenv("USE_RTDB_EMULATOR", "false").lower() == "true"
+
+    # Get RTDB URL
+    rtdb_url = os.getenv("FIREBASE_DATABASE_URL")
 
     if os.path.exists(cred_path):
         cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
 
-        # Configure emulator if needed
+        # Initialize with RTDB URL if provided
+        init_options = {}
+        if rtdb_url:
+            init_options["databaseURL"] = rtdb_url
+
+        firebase_admin.initialize_app(cred, init_options)
+
+        # Configure emulators if needed
         if use_emulator:
             os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"
             print("🔧 Firebase Admin SDK initialized with EMULATOR mode")
             print("   → Firestore Emulator: localhost:8080")
-        else:
+
+        if use_rtdb_emulator:
+            os.environ["FIREBASE_DATABASE_EMULATOR_HOST"] = "localhost:9000"
+            print("   → RTDB Emulator: localhost:9000")
+
+        if rtdb_url:
+            print(f"   → Realtime Database: {rtdb_url}")
+
+        if not use_emulator and not use_rtdb_emulator:
             print("✅ Firebase Admin SDK initialized (Production mode)")
+            if rtdb_url:
+                print(f"   → Realtime Database URL: {rtdb_url}")
     else:
         print("⚠️  Firebase credentials not found - Auth disabled")
 except Exception as e:

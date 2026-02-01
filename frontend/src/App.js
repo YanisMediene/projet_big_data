@@ -12,6 +12,8 @@ import GuessingGame from './components/Multiplayer/GuessingGame';
 import Settings from './components/Settings/Settings';
 import NewFrontTest from './NewFrontTest';
 import TestCanva from './TestCanva';
+import { ToastProvider } from './components/shared/Toast';
+import ConnectionStatus from './components/shared/ConnectionStatus';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { predictDrawing, checkHealth, getCategories } from './services/api';
 import { useSettings } from './hooks/useSettings';
@@ -329,15 +331,18 @@ function AppLayout() {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <Routes>
-          {/* Route standalone plein écran pour NewFrontTest */}
-          <Route path="/" element={<NewFrontTest />} />
-          <Route path="/test_canva" element={<TestCanva />} />
-          <Route path="/old" element={<AppLayout />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
+      <ToastProvider>
+        <Router>
+          <ConnectionStatus />
+          <Routes>
+            {/* Route standalone plein écran pour NewFrontTest */}
+            <Route path="/" element={<NewFrontTest />} />
+            <Route path="/test_canva" element={<TestCanva />} />
+            <Route path="/old" element={<AppLayout />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+      </ToastProvider>
     </AuthProvider>
   );
 }

@@ -1,0 +1,27 @@
+{
+  "rules": {
+    "presence": {
+      "$gameId": {
+        ".read": true,
+        "$playerId": {
+          ".read": true,
+          ".write": "auth != null && auth.uid == $playerId",
+          ".validate": "newData.hasChildren(['online', 'lastSeen', 'playerName'])"
+        }
+      }
+    },
+    "games": {
+      "$gameId": {
+        ".read": true,
+        ".write": "auth != null",
+        "typing": {
+          "$playerId": {
+            ".write": "auth != null && auth.uid == $playerId"
+          }
+        }
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

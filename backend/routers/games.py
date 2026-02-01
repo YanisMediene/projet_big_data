@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 from datetime import datetime
 from services.firestore_service import FirestoreService
+from services.presence_service import PresenceService, GameCleanupService
 from firebase_admin import firestore
 import random
 
@@ -974,4 +975,147 @@ async def guessing_timeout(request: StartGameRequest):
         "current_round": game["current_round"],
         "new_drawer": next_drawer,
         "new_category": next_category,
+    }
+
+
+# ==================== PRESENCE & LEAVE ENDPOINTS ====================
+
+
+class LeaveGameRequest(BaseModel):
+    game_id: str
+    player_id: str
+
+
+class HeartbeatRequest(BaseModel):
+    game_id: str
+    player_id: str
+
+
+class SetPresenceRequest(BaseModel):
+    game_id: str
+    player_id: str
+    player_name: str
+
+
+@router.post("/presence/online")
+async def set_player_online(request: SetPresenceRequest):
+    """
+    Mark a player as online in a game (called when joining/reconnecting)
+    """
+    success = await PresenceService.set_player_online(
+        request.game_id, request.player_id, request.player_name
+    )
+
+    if success:
+        return {
+            "status": "online",
+            "message": f"Player {request.player_name} is now online",
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to set player online")
+
+
+@router.post("/presence/offline")
+async def set_player_offline(request: LeaveGameRequest):
+    """
+    Mark a player as offline (called when leaving gracefully)
+    """
+    success = await PresenceService.set_player_offline(
+        request.game_id, request.player_id
+    )
+
+    if success:
+        return {"status": "offline"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to set player offline")
+
+
+@router.post("/presence/heartbeat")
+async def player_heartbeat(request: HeartbeatRequest):
+    """
+    Update player's heartbeat timestamp
+    Should be called every 10-15 seconds by the client
+    """
+    success = await PresenceService.heartbeat(request.game_id, request.player_id)
+
+    if success:
+        return {"status": "heartbeat_received"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update heartbeat")
+
+
+@router.get("/presence/{game_id}")
+async def get_game_presence(game_id: str):
+    """
+    Get presence status for all players in a game
+    """
+    presence = await PresenceService.get_game_presence(game_id)
+    online_players = await PresenceService.get_online_players(game_id)
+
+    return {
+        "game_id": game_id,
+        "presence": presence,
+        "online_player_ids": online_players,
+        "online_count": len(online_players),
+    }
+
+
+@router.post("/race/leave")
+async def leave_race_game(request: LeaveGameRequest):
+    """
+    Leave a Race Mode game
+
+    Handles:
+    - Removing player from game
+    - Transferring creator if needed
+    - Ending game if not enough players
+    - Cleaning up presence data
+    """
+    result = await GameCleanupService.remove_player_from_game(
+        request.game_id, request.player_id
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@router.post("/guessing/leave")
+async def leave_guessing_game(request: LeaveGameRequest):
+    """
+    Leave a Guessing Game
+
+    Handles:
+    - Removing player from game
+    - Selecting new drawer if current drawer left
+    - Ending game if not enough players
+    - Cleaning up presence data
+    """
+    result = await GameCleanupService.remove_player_from_game(
+        request.game_id, request.player_id
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@router.post("/cleanup/stale-players/{game_id}")
+async def cleanup_stale_players(game_id: str):
+    """
+    Remove players who haven't sent heartbeat recently
+    Called periodically or when issues are detected
+    """
+    removed = await PresenceService.cleanup_stale_players(game_id)
+
+    # Also update Firestore to remove these players
+    for player_id in removed:
+        await GameCleanupService.remove_player_from_game(game_id, player_id)
+
+    return {
+        "status": "cleanup_complete",
+        "removed_players": removed,
+        "count": len(removed),
     }

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { ref, onValue } from 'firebase/database';
 import DrawingCanvas from '../DrawingCanvas';
+import { usePresence, useLeaveGame } from '../../hooks/usePresence';
 import './Multiplayer.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 function RaceMode() {
   const { gameId } = useParams();
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
   
   const [game, setGame] = useState(null);
@@ -18,9 +21,35 @@ function RaceMode() {
   const [canvasImage, setCanvasImage] = useState(null);
   const [gameStatus, setGameStatus] = useState('waiting'); // waiting, playing, finished
   const [roundNotification, setRoundNotification] = useState(null);
+  const [presence, setPresence] = useState({});
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
   
   const canvasRef = useRef(null);
   const previousRoundRef = useRef(null);
+
+  // Determine player name for presence
+  const playerName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Joueur';
+
+  // Initialize presence system
+  usePresence(gameId, currentUser?.uid, playerName, !!currentUser && !!gameId);
+  const { leaveGame, isLeaving: leaveInProgress } = useLeaveGame('race');
+
+  // Listen to presence updates
+  useEffect(() => {
+    if (!gameId) return;
+
+    const presenceRef = ref(rtdb, `presence/${gameId}`);
+    const unsubscribe = onValue(presenceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setPresence(snapshot.val());
+      } else {
+        setPresence({});
+      }
+    });
+
+    return () => unsubscribe();
+  }, [gameId]);
 
   // Listen to game updates in real-time
   useEffect(() => {
@@ -154,8 +183,67 @@ function RaceMode() {
   const isCreator = game.creator_id === currentUser?.uid;
   const currentPlayer = game.players.find(p => p.player_id === currentUser?.uid);
 
+  // Check if a player is online
+  const isPlayerOnline = (playerId) => {
+    const playerPresence = presence[playerId];
+    if (!playerPresence) return false;
+    const lastSeen = playerPresence.lastSeen || 0;
+    const threshold = 30000; // 30 seconds
+    return playerPresence.online && (Date.now() - lastSeen < threshold);
+  };
+
+  // Handle leaving the game
+  const handleLeaveGame = async () => {
+    setIsLeaving(true);
+    try {
+      const result = await leaveGame(gameId, currentUser?.uid);
+      if (result.success) {
+        navigate('/multiplayer');
+      } else {
+        alert(result.error || 'Erreur lors de la sortie de la partie');
+      }
+    } catch (error) {
+      console.error('Error leaving game:', error);
+      alert('Erreur lors de la sortie de la partie');
+    } finally {
+      setIsLeaving(false);
+      setShowLeaveModal(false);
+    }
+  };
+
   return (
     <div className="race-mode">
+      {/* Leave confirmation modal */}
+      {showLeaveModal && (
+        <div className="modal-overlay">
+          <div className="modal-content leave-modal">
+            <h3>⚠️ Quitter la partie ?</h3>
+            <p>Êtes-vous sûr de vouloir quitter cette partie ?</p>
+            {isCreator && game.players.length > 1 && (
+              <p className="warning-text">
+                En tant qu'hôte, un autre joueur deviendra le nouvel hôte.
+              </p>
+            )}
+            <div className="modal-actions">
+              <button 
+                className="cancel-btn" 
+                onClick={() => setShowLeaveModal(false)}
+                disabled={isLeaving || leaveInProgress}
+              >
+                Annuler
+              </button>
+              <button 
+                className="confirm-leave-btn" 
+                onClick={handleLeaveGame}
+                disabled={isLeaving || leaveInProgress}
+              >
+                {isLeaving || leaveInProgress ? 'Sortie...' : 'Quitter'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Round notification */}
       {roundNotification && (
         <div className="round-notification">
@@ -202,6 +290,15 @@ function RaceMode() {
               </div>
             </>
           )}
+          {gameStatus !== 'finished' && (
+            <button 
+              className="leave-game-btn"
+              onClick={() => setShowLeaveModal(true)}
+              title="Quitter la partie"
+            >
+              🚪 Quitter
+            </button>
+          )}
         </div>
       </div>
 
@@ -213,11 +310,12 @@ function RaceMode() {
             {game.players.map((player, index) => (
               <div
                 key={player.player_id}
-                className={`player-card ${player.player_id === currentUser?.uid ? 'current-player' : ''}`}
+                className={`player-card ${player.player_id === currentUser?.uid ? 'current-player' : ''} ${!isPlayerOnline(player.player_id) ? 'player-offline' : ''}`}
               >
                 <div className="player-rank">#{index + 1}</div>
                 <div className="player-info">
                   <div className="player-name">
+                    <span className={`presence-dot ${isPlayerOnline(player.player_id) ? 'online' : 'offline'}`}></span>
                     {player.player_name}
                     {player.player_id === game.creator_id && (
                       <span className="host-badge">👑</span>

@@ -1,0 +1,87 @@
+/* Connection Status Banner Styles */
+
+.connection-status-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 14px 28px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  animation: slideUpFade 0.4s ease-out;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes slideUpFade {
+  from {
+    transform: translateX(-50%) translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+}
+
+.connection-status-banner.disconnected {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  color: #dc2626;
+  border: 2px solid #fecaca;
+}
+
+.connection-status-banner.connected {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  color: #059669;
+  border: 2px solid #a7f3d0;
+  animation: slideUpFade 0.4s ease-out, fadeOut 0.5s ease-in 2.5s forwards;
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+.status-icon {
+  font-size: 1.3rem;
+}
+
+.status-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-text {
+  white-space: nowrap;
+}
+
+/* Mobile responsive */
+@media (max-width: 480px) {
+  .connection-status-banner {
+    left: 10px;
+    right: 10px;
+    transform: none;
+    width: calc(100% - 20px);
+    justify-content: center;
+    padding: 12px 16px;
+    font-size: 0.9rem;
+  }
+}
