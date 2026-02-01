@@ -3,25 +3,25 @@
     "presence": {
       "$gameId": {
         ".read": true,
+        ".write": true,
         "$playerId": {
           ".read": true,
-          ".write": "auth != null && auth.uid == $playerId",
-          ".validate": "newData.hasChildren(['online', 'lastSeen', 'playerName'])"
+          ".write": true
         }
       }
     },
     "games": {
+      ".read": true,
+      ".write": true,
       "$gameId": {
         ".read": true,
-        ".write": "auth != null",
+        ".write": true,
         "typing": {
           "$playerId": {
-            ".write": "auth != null && auth.uid == $playerId"
+            ".write": true
           }
         }
       }
-    },
-    ".read": false,
-    ".write": false
+    }
   }
 }
