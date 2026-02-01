@@ -126,6 +126,7 @@ async def create_race_game(request: CreateGameRequest):
         "current_category": None,
         "round_start_time": None,
         "round_submissions": {},  # Track best confidence per player for current round
+        "used_categories": [],  # Track categories already used to prevent repetition
     }
 
     game_id = await firestore_service.create_game(game_data)
@@ -202,9 +203,18 @@ async def start_race_game(request: StartGameRequest):
     if len(game["players"]) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 players")
 
-    # Select first category randomly
+    # Select first category randomly (excluding already used ones)
     categories = game["settings"]["categories"]
-    first_category = random.choice(categories)
+    used_categories = game.get("used_categories", [])
+    available_categories = [c for c in categories if c not in used_categories]
+
+    # If all categories have been used, reset the pool
+    if not available_categories:
+        available_categories = categories
+        used_categories = []
+
+    first_category = random.choice(available_categories)
+    used_categories.append(first_category)
 
     # Update game state
     update_data = {
@@ -213,6 +223,7 @@ async def start_race_game(request: StartGameRequest):
         "current_category": first_category,
         "round_start_time": firestore.SERVER_TIMESTAMP,
         "round_submissions": {},  # Reset submissions for new round
+        "used_categories": used_categories,
     }
 
     await firestore_service.update_game(request.game_id, update_data)
@@ -336,7 +347,18 @@ async def submit_race_drawing(request: SubmitDrawingRequest):
                 # Start next round
                 next_round = game["current_round"] + 1
                 categories = game["settings"]["categories"]
-                next_category = random.choice(categories)
+                used_categories = game.get("used_categories", [])
+                available_categories = [
+                    c for c in categories if c not in used_categories
+                ]
+
+                # If all categories have been used, reset the pool
+                if not available_categories:
+                    available_categories = categories
+                    used_categories = []
+
+                next_category = random.choice(available_categories)
+                used_categories.append(next_category)
 
                 await firestore_service.update_game(
                     request.game_id,
@@ -347,6 +369,7 @@ async def submit_race_drawing(request: SubmitDrawingRequest):
                         "round_winners": round_winners,
                         "players": game["players"],
                         "round_submissions": {},  # Reset submissions for new round
+                        "used_categories": used_categories,
                     },
                 )
 
@@ -462,7 +485,16 @@ async def race_timeout(request: StartGameRequest):
     # Start next round
     next_round = game["current_round"] + 1
     categories = game["settings"]["categories"]
-    next_category = random.choice(categories)
+    used_categories = game.get("used_categories", [])
+    available_categories = [c for c in categories if c not in used_categories]
+
+    # If all categories have been used, reset the pool
+    if not available_categories:
+        available_categories = categories
+        used_categories = []
+
+    next_category = random.choice(available_categories)
+    used_categories.append(next_category)
 
     await firestore_service.update_game(
         request.game_id,
@@ -473,6 +505,7 @@ async def race_timeout(request: StartGameRequest):
             "round_winners": round_winners,
             "players": game["players"],
             "round_submissions": {},  # Reset submissions for new round
+            "used_categories": used_categories,
         },
     )
 
@@ -592,6 +625,7 @@ async def create_guessing_game(request: CreateGameRequest):
         "round_winners": [],
         "team_humans": {"score": 0, "rounds_won": 0},
         "team_ai": {"score": 0, "rounds_won": 0, "predictions": []},
+        "used_categories": [],  # Track categories already used to prevent repetition
     }
 
     game_id = await firestore_service.create_game(game_data)
@@ -654,7 +688,19 @@ async def start_guessing_game(request: StartGameRequest):
 
     # Select first drawer (random)
     first_drawer = random.choice(game["players"])
-    first_category = random.choice(game["settings"]["categories"])
+
+    # Select first category (excluding already used ones)
+    categories = game["settings"]["categories"]
+    used_categories = game.get("used_categories", [])
+    available_categories = [c for c in categories if c not in used_categories]
+
+    # If all categories have been used, reset the pool
+    if not available_categories:
+        available_categories = categories
+        used_categories = []
+
+    first_category = random.choice(available_categories)
+    used_categories.append(first_category)
 
     update_data = {
         "status": "playing",
@@ -665,6 +711,7 @@ async def start_guessing_game(request: StartGameRequest):
             "player_name": first_drawer["player_name"],
         },
         "round_start_time": firestore.SERVER_TIMESTAMP,
+        "used_categories": used_categories,
     }
 
     await firestore_service.update_game(request.game_id, update_data)
@@ -734,7 +781,22 @@ async def submit_guess(request: SubmitGuessRequest):
                 # Next round
                 game["current_round"] += 1
                 next_drawer = random.choice(game["players"])
-                next_category = random.choice(game["settings"]["categories"])
+
+                # Select next category (excluding already used ones)
+                categories = game["settings"]["categories"]
+                used_categories = game.get("used_categories", [])
+                available_categories = [
+                    c for c in categories if c not in used_categories
+                ]
+
+                # If all categories have been used, reset the pool
+                if not available_categories:
+                    available_categories = categories
+                    used_categories = []
+
+                next_category = random.choice(available_categories)
+                used_categories.append(next_category)
+
                 game["current_drawer"] = {
                     "player_id": next_drawer["player_id"],
                     "player_name": next_drawer["player_name"],
@@ -742,6 +804,7 @@ async def submit_guess(request: SubmitGuessRequest):
                 game["current_category"] = next_category
                 game["round_start_time"] = firestore.SERVER_TIMESTAMP
                 game["team_ai"]["predictions"] = []
+                game["used_categories"] = used_categories
 
             await firestore_service.update_game(request.game_id, game)
 
@@ -850,7 +913,20 @@ async def submit_ai_prediction(request: AiPredictionRequest):
             # Next round
             game["current_round"] += 1
             next_drawer = random.choice(game["players"])
-            next_category = random.choice(game["settings"]["categories"])
+
+            # Select next category (excluding already used ones)
+            categories = game["settings"]["categories"]
+            used_categories = game.get("used_categories", [])
+            available_categories = [c for c in categories if c not in used_categories]
+
+            # If all categories have been used, reset the pool
+            if not available_categories:
+                available_categories = categories
+                used_categories = []
+
+            next_category = random.choice(available_categories)
+            used_categories.append(next_category)
+
             game["current_drawer"] = {
                 "player_id": next_drawer["player_id"],
                 "player_name": next_drawer["player_name"],
@@ -859,6 +935,7 @@ async def submit_ai_prediction(request: AiPredictionRequest):
             game["round_start_time"] = firestore.SERVER_TIMESTAMP
             game["team_ai"]["predictions"] = []
             game["canvas_state"] = None  # Clear canvas for new round
+            game["used_categories"] = used_categories
 
         await firestore_service.update_game(request.game_id, game)
 
@@ -958,7 +1035,20 @@ async def guessing_timeout(request: StartGameRequest):
     # Next round
     game["current_round"] += 1
     next_drawer = random.choice(game["players"])
-    next_category = random.choice(game["settings"]["categories"])
+
+    # Select next category (excluding already used ones)
+    categories = game["settings"]["categories"]
+    used_categories = game.get("used_categories", [])
+    available_categories = [c for c in categories if c not in used_categories]
+
+    # If all categories have been used, reset the pool
+    if not available_categories:
+        available_categories = categories
+        used_categories = []
+
+    next_category = random.choice(available_categories)
+    used_categories.append(next_category)
+
     game["current_drawer"] = {
         "player_id": next_drawer["player_id"],
         "player_name": next_drawer["player_name"],
@@ -966,6 +1056,7 @@ async def guessing_timeout(request: StartGameRequest):
     game["current_category"] = next_category
     game["round_start_time"] = firestore.SERVER_TIMESTAMP
     game["team_ai"]["predictions"] = []
+    game["used_categories"] = used_categories
 
     await firestore_service.update_game(request.game_id, game)
 
