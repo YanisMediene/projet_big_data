@@ -520,8 +520,9 @@ export const sendChatMessage = async (roomCode, playerId, playerName, message, i
   
   await set(chatRef, newChat);
   
-  // If correct guess, end the round
-  if (isCorrect) {
+  // If correct guess by a HUMAN player, end the round and give points
+  // AI wins are handled separately by aiGuessedCorrectly()
+  if (isCorrect && playerId !== 'AI') {
     const gameSnapshot = await get(gameRef);
     if (!gameSnapshot.exists()) return;
     
@@ -585,11 +586,13 @@ export const aiGuessedCorrectly = async (roomCode) => {
   
   await set(chatRef, [...currentChat, aiMessage].slice(-50));
   
-  // AI wins - no points for team
+  // AI wins - no points for team, but AI gets points
+  const currentAiScore = gameData.aiScore || 0;
   await update(gameRef, {
     roundWinner: 'AI',
     roundWinnerType: 'ai',
-    roundStatus: 'finished'
+    roundStatus: 'finished',
+    aiScore: currentAiScore + 100
   });
 };
 

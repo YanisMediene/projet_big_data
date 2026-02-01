@@ -43,6 +43,9 @@ export default function QuickDrawApp() {
   
   // Controls the "Curtain" transition overlay during the game
   const [showOverlay, setShowOverlay] = useState(false);
+  
+  // AI Score for Team mode (persistent across rounds)
+  const [globalAiScore, setGlobalAiScore] = useState(0);
 
   // Charger les catégories depuis l'API au démarrage
   useEffect(() => {
@@ -116,8 +119,13 @@ export default function QuickDrawApp() {
       return;
     }
     
-    console.log('🔄 handleGameUpdate - roundStatus:', data.roundStatus, 'gameState:', gameState);
+    console.log('🔄 handleGameUpdate - roundStatus:', data.roundStatus, 'gameState:', gameState, 'aiScore:', data.aiScore);
     setGameData(data);
+    
+    // Sync AI score from Firebase (TEAM mode)
+    if (typeof data.aiScore === 'number') {
+      setGlobalAiScore(data.aiScore);
+    }
     
     // If roundStatus is 'playing' and we still have overlay, dismiss it
     if (data.roundStatus === 'playing' && showOverlay && gameState === 'PLAYING') {
@@ -389,6 +397,9 @@ export default function QuickDrawApp() {
             currentDrawerId={gameData?.currentDrawerId}
             gameData={gameData}
             isHost={isHost}
+            // AI Score props
+            globalAiScore={globalAiScore}
+            onAiScoreUpdate={setGlobalAiScore}
           />
           
           <TransitionOverlay 
@@ -415,6 +426,7 @@ export default function QuickDrawApp() {
           drawings={drawings}
           gameMode={gameMode}
           players={players}
+          aiScore={globalAiScore}
           onRestart={goToModeSelect}
         />
       )}
@@ -1121,7 +1133,10 @@ function DrawingScreen({
   playerId = '',
   currentDrawerId = null,
   gameData = null,
-  isHost = false
+  isHost = false,
+  // AI Score props
+  globalAiScore = 0,
+  onAiScoreUpdate = null
 }) {
   const canvasRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(ROUND_TIME);
@@ -1141,6 +1156,7 @@ function DrawingScreen({
   const chatUnsubscribeRef = useRef(null);
   const lastDrawingRef = useRef(null); // Track last received drawing to avoid duplicate renders
   const canvasInitializedRef = useRef(false); // Track if canvas was initialized;
+  const aiWonThisRoundRef = useRef(false); // Track if AI already won this round
   
   // Team mode detection
   const isTeamMode = gameMode === 'TEAM' && roomCode;
@@ -1152,6 +1168,7 @@ function DrawingScreen({
     currentRoundRef.current = round; // Mettre à jour la référence du round
     isPredictingRef.current = false; // Réinitialiser le flag de prédiction
     setRoundFinished(false); // Reset round finished flag
+    aiWonThisRoundRef.current = false; // Reset AI win flag for new round
     setTimeLeft(ROUND_TIME);
     setAiText("Je ne vois rien pour l'instant...");
     setHasStartedDrawing(false);
@@ -1282,6 +1299,9 @@ function DrawingScreen({
   useEffect(() => {
     if (!hasStartedDrawing || isPaused || showQuitConfirm || predictions.length === 0) return;
     
+    // CRITICAL: Stop AI predictions when round is finished
+    if (roundFinished || gameData?.roundStatus === 'finished') return;
+    
     // In TEAM mode, only the drawer runs AI predictions
     if (isTeamMode && !isDrawer) return;
 
@@ -1293,19 +1313,27 @@ function DrawingScreen({
       // In Team Mode with Firebase, AI sends guesses via Firebase
       const aiGuess = topPrediction.categoryFr;
       
-      // Check if AI already sent this guess (check Firebase messages)
+      // Don't send more messages if AI already won this round (use ref for immediate check)
+      if (aiWonThisRoundRef.current) return;
+      
+      // Check if AI wins (correct prediction with enough confidence)
+      const aiIsCorrect = topPrediction.category === targetEnglish && topPrediction.confidence >= 0.25;
+      
+      // Check if AI already sent this exact guess (avoid duplicates)
       const hasAlreadySentThisGuess = chatMessages.some(
-        msg => msg.playerId === 'AI' && msg.message === aiGuess && !msg.isCorrect
+        msg => msg.playerId === 'AI' && msg.message === aiGuess
       );
       
       if (!hasAlreadySentThisGuess && topPrediction.confidence >= 0.15) {
-        // Send AI guess to Firebase chat
-        MultiplayerService.sendChatMessage(roomCode, 'AI', '🤖 IA', aiGuess, false)
+        // Send AI guess to Firebase chat with isCorrect flag
+        MultiplayerService.sendChatMessage(roomCode, 'AI', '🤖 IA', aiGuess, aiIsCorrect)
           .catch(console.error);
         
-        // Check if AI wins (correct prediction with enough confidence)
-        if (topPrediction.category === targetEnglish && topPrediction.confidence >= 0.25) {
+        if (aiIsCorrect) {
           console.log('🤖 AI guessed correctly!');
+          aiWonThisRoundRef.current = true; // Mark AI as winner immediately
+          // AI score is now updated in Firebase by aiGuessedCorrectly
+          // All clients will receive the update via handleGameUpdate
           MultiplayerService.aiGuessedCorrectly(roomCode)
             .catch(console.error);
         }
@@ -1328,7 +1356,7 @@ function DrawingScreen({
         }
       }
     }
-  }, [predictions, hasStartedDrawing, isPaused, showQuitConfirm, gameMode, word, players, chatMessages, isTeamMode, isDrawer, roomCode]);
+  }, [predictions, hasStartedDrawing, isPaused, showQuitConfirm, gameMode, word, players, chatMessages, isTeamMode, isDrawer, roomCode, roundFinished, gameData?.roundStatus]);
 
   // Local chat message (for non-Firebase mode)
   const addLocalChatMessage = (sender, text, isCorrect = false) => {
@@ -1890,7 +1918,7 @@ function DrawingScreen({
               <>
                 <span className="text-blue-600 font-bold">👥 Équipe {players.reduce((sum, p) => sum + (p.score || 0), 0)}</span>
                 <span className="mx-2">vs</span>
-                <span className="text-red-600 font-bold">🤖 IA {chatMessages.filter(m => m.isCorrect && m.playerId === 'AI').length * 100}</span>
+                <span className="text-red-600 font-bold">🤖 IA {globalAiScore}</span>
                 {isDrawer && (
                   <span className="ml-4 text-purple-600 font-bold">
                     Dessinez : <span className="capitalize">{word}</span>
@@ -1898,11 +1926,11 @@ function DrawingScreen({
                 )}
               </>
             ) : gameMode === 'TEAM' ? (
-              // Local team mode (fallback)
+              // Local team mode (fallback) - même calcul que Firebase mode
               <>
-                <span className="text-blue-600 font-bold">Team {players.filter(p => p.id === 'me').length > 0 ? players.filter(p => p.id !== 'me').reduce((sum, p) => sum + p.score, 0) : 0}</span>
+                <span className="text-blue-600 font-bold">👥 Équipe {players.reduce((sum, p) => sum + (p.score || 0), 0)}</span>
                 <span className="mx-2">vs</span>
-                <span className="text-red-600 font-bold">AI 0</span>
+                <span className="text-red-600 font-bold">🤖 IA {globalAiScore}</span>
               </>
             ) : (
               <>
@@ -2084,7 +2112,7 @@ function DrawingScreen({
   );
 }
 
-function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], onRestart }) {
+function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore = 0, onRestart }) {
   // Calculate winner message
   const getWinnerMessage = () => {
     if (gameMode === 'RACE') {
@@ -2102,8 +2130,9 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], onRestar
         };
       }
     } else if (gameMode === 'TEAM') {
-      const teamScore = players.filter(p => p.id !== 'me').reduce((sum, p) => sum + p.score, 0);
-      const aiScore = drawings.filter(d => d.winner === 'AI').length * 5;
+      // Score équipe : somme des scores de tous les joueurs
+      const teamScore = players.reduce((sum, p) => sum + (p.score || 0), 0);
+      // Score IA : passé en prop depuis le parent
       
       if (teamScore > aiScore) {
         return {
@@ -2183,9 +2212,9 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], onRestar
           <div className="flex justify-around items-center">
             <div className="text-center">
               <div className="text-5xl mb-2">👥</div>
-              <div className="text-lg font-bold text-gray-600">Team</div>
+              <div className="text-lg font-bold text-gray-600">Équipe</div>
               <div className="text-4xl font-bold text-blue-600">
-                {players.filter(p => p.id !== 'me').reduce((sum, p) => sum + p.score, 0)}
+                {players.reduce((sum, p) => sum + (p.score || 0), 0)}
               </div>
             </div>
             <div className="text-5xl font-bold text-gray-300">VS</div>
@@ -2193,7 +2222,7 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], onRestar
               <div className="text-5xl mb-2">🤖</div>
               <div className="text-lg font-bold text-gray-600">IA</div>
               <div className="text-4xl font-bold text-red-600">
-                {drawings.filter(d => d.winner === 'AI').length * 5}
+                {aiScore}
               </div>
             </div>
           </div>
