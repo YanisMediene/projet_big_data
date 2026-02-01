@@ -1,0 +1,1144 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send, Loader2 } from 'lucide-react';
+import { predictDrawing, getCategories } from './services/api';
+import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
+import * as MultiplayerService from './services/multiplayerService';
+
+// Atomized components
+import WelcomeScreen from './components/game/WelcomeScreen';
+import GameModeSelection from './components/game/GameModeSelection';
+import TransitionOverlay from './components/game/TransitionOverlay';
+import MultiplayerFlow from './components/game/MultiplayerFlow';
+import GameOverScreen from './components/game/GameOverScreen';
+import DrawingScreen from './components/game/DrawingScreen';
+
+// Constants
+import {
+  TOTAL_ROUNDS_CLASSIC,
+  TOTAL_ROUNDS_RACE,
+  ROUND_TIME,
+  WRONG_GUESSES,
+  INITIAL_MOCK_PLAYERS
+} from './constants/gameConstants';
+
+// --- MAIN COMPONENT ---
+export default function QuickDrawApp() {
+  const [gameState, setGameState] = useState('WELCOME'); // WELCOME, MODE_SELECT, LOBBY_FLOW, PLAYING, GAME_OVER
+  const [gameMode, setGameMode] = useState('CLASSIC'); // CLASSIC, RACE, TEAM
+  const [round, setRound] = useState(1);
+  const [currentWord, setCurrentWord] = useState('');
+  const [previousWord, setPreviousWord] = useState(''); // Pour éviter les répétitions
+  const [drawings, setDrawings] = useState([]); 
+  const [players, setPlayers] = useState([]);
+  
+  // Multiplayer state
+  const [roomCode, setRoomCode] = useState('');
+  const [playerId, setPlayerId] = useState('');
+  const [isHost, setIsHost] = useState(false);
+  const [gameData, setGameData] = useState(null);
+  
+  // Liste des mots disponibles - chargée depuis l'API
+  const [wordsToDrawFr, setWordsToDrawFr] = useState([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  
+  // Controls the "Curtain" transition overlay during the game
+  const [showOverlay, setShowOverlay] = useState(false);
+  
+  // AI Score for Team mode (persistent across rounds)
+  const [globalAiScore, setGlobalAiScore] = useState(0);
+
+  // Charger les catégories depuis l'API au démarrage
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const data = await getCategories();
+        if (data.categories && data.categories.length > 0) {
+          // Convertir les catégories anglaises en français
+          const wordsFr = data.categories.map(cat => CATEGORY_MAP[cat] || cat);
+          setWordsToDrawFr(wordsFr);
+          setCategoriesLoaded(true);
+          console.log(`✅ Loaded ${data.count} categories from backend`);
+        }
+      } catch (error) {
+        console.error('Failed to load categories:', error);
+        // Fallback: utiliser toutes les catégories du fichier
+        setWordsToDrawFr(Object.values(CATEGORY_MAP));
+        setCategoriesLoaded(true);
+      }
+    };
+    
+    loadCategories();
+  }, []);
+
+  // Start sequence: Welcome -> Mode Select
+  const goToModeSelect = () => {
+    setGameState('MODE_SELECT');
+  };
+
+  // Mode Select -> Playing (Classic)
+  const startClassicGame = () => {
+    setGameMode('CLASSIC');
+    setRound(1);
+    setDrawings([]);
+    setPreviousWord(''); // Reset le mot précédent
+    setPlayers(INITIAL_MOCK_PLAYERS);
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(true);
+    setGameData(null);
+    setGameState('PLAYING');
+    prepareRound(1);
+  };
+
+  // Mode Select -> Lobby Flow (Race/Team)
+  const startMultiplayerGame = (mode) => {
+    setGameMode(mode);
+    setRound(1);
+    setDrawings([]);
+    setPreviousWord('');
+    setPlayers([]);
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(false);
+    setGameData(null);
+    setGameState('LOBBY_FLOW');
+  };
+
+  // Handle multiplayer game created/joined
+  const handleMultiplayerJoined = useCallback((code, id, host) => {
+    setRoomCode(code);
+    setPlayerId(id);
+    setIsHost(host);
+  }, []);
+
+  // Handle game data updates from Firebase
+  const handleGameUpdate = useCallback((data) => {
+    if (!data) {
+      // Game deleted or doesn't exist
+      setGameState('MODE_SELECT');
+      return;
+    }
+    
+    console.log('🔄 handleGameUpdate - roundStatus:', data.roundStatus, 'gameState:', gameState, 'aiScore:', data.aiScore);
+    setGameData(data);
+    
+    // Sync AI score from Firebase (TEAM mode)
+    if (typeof data.aiScore === 'number') {
+      setGlobalAiScore(data.aiScore);
+    }
+    
+    // If roundStatus is 'playing' and we still have overlay, dismiss it
+    if (data.roundStatus === 'playing' && showOverlay && gameState === 'PLAYING') {
+      console.log('🎬 Round is playing, dismissing overlay from handleGameUpdate');
+      setShowOverlay(false);
+    }
+    
+    // Convert players object to array
+    const playersArray = Object.values(data.players || {}).map(p => ({
+      ...p,
+      id: p.id === playerId ? 'me' : p.id
+    })).sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    setPlayers(playersArray);
+    
+    // Handle game state transitions
+    if (data.status === 'playing' && gameState === 'LOBBY_FLOW') {
+      // Game just started - transition to playing
+      setGameState('PLAYING');
+      setRound(data.currentRound || 1);
+      setCurrentWord(data.currentWord || '');
+      setShowOverlay(true);
+    } else if (data.status === 'playing' && gameState === 'PLAYING') {
+      // Update round info during game
+      if (data.currentRound !== round) {
+        // New round started
+        setRound(data.currentRound);
+        setCurrentWord(data.currentWord || '');
+        setShowOverlay(true);
+      }
+      
+      // Handle round status changes (waiting -> playing)
+      // The overlay will auto-dismiss when roundStatus becomes 'playing'
+      if (data.roundStatus === 'playing' && showOverlay) {
+        // Round has started, overlay will be dismissed by TransitionOverlay component
+        // via the roundStatus prop
+      }
+    } else if (data.status === 'finished') {
+      setGameState('GAME_OVER');
+    }
+  }, [playerId, gameState, round, showOverlay]);
+
+  // Subscribe to game updates when playing multiplayer
+  // This maintains the subscription after transitioning from LOBBY_FLOW to PLAYING
+  useEffect(() => {
+    if (gameState !== 'PLAYING' || !roomCode || gameMode === 'CLASSIC') {
+      return;
+    }
+    
+    console.log('📡 Setting up game subscription for playing state - room:', roomCode);
+    
+    const unsubscribe = MultiplayerService.subscribeToGame(roomCode, (data) => {
+      if (data) {
+        console.log('📥 Game update received:', { roundStatus: data.roundStatus, round: data.currentRound });
+        handleGameUpdate(data);
+      }
+    });
+    
+    return () => {
+      console.log('🔌 Cleaning up game subscription');
+      unsubscribe();
+    };
+  }, [gameState, roomCode, gameMode, handleGameUpdate]);
+
+  // Lobby Flow -> Playing (start game as host)
+  const startGameFromLobby = async () => {
+    if (gameMode === 'CLASSIC') {
+      setGameState('PLAYING');
+      prepareRound(1);
+    } else {
+      // Multiplayer - start game via Firebase
+      try {
+        await MultiplayerService.startGame(roomCode, wordsToDrawFr);
+        // State will be updated via subscription
+      } catch (error) {
+        console.error('Error starting game:', error);
+        alert('Erreur lors du démarrage de la partie');
+      }
+    }
+  };
+
+  // Leave multiplayer game
+  const leaveMultiplayerGame = async () => {
+    if (roomCode && playerId) {
+      try {
+        await MultiplayerService.leaveGame(roomCode, playerId);
+      } catch (error) {
+        console.error('Error leaving game:', error);
+      }
+    }
+    setRoomCode('');
+    setPlayerId('');
+    setIsHost(false);
+    setGameData(null);
+    setGameState('MODE_SELECT');
+  };
+
+  // Force start round after timeout (5 seconds)
+  const handleForceStartRound = useCallback(async () => {
+    if (roomCode) {
+      try {
+        await MultiplayerService.forceStartRound(roomCode);
+      } catch (error) {
+        console.error('Error force starting round:', error);
+      }
+    }
+  }, [roomCode]);
+
+  const prepareRound = (roundNum) => {
+    // Ne pas démarrer si les catégories ne sont pas chargées
+    if (!categoriesLoaded || wordsToDrawFr.length === 0) {
+      console.warn('Categories not loaded yet');
+      return;
+    }
+    
+    // Choisir un mot différent du précédent
+    let word;
+    do {
+      word = wordsToDrawFr[Math.floor(Math.random() * wordsToDrawFr.length)];
+    } while (word === previousWord && wordsToDrawFr.length > 1);
+    
+    setCurrentWord(word);
+    setPreviousWord(word);
+    // Show the curtain overlay for instructions
+    setShowOverlay(true);
+  };
+
+  const handleRoundComplete = async (imageData, success, winner = null, timeLeft = 0, confidence = 0) => {
+    // Calculate points
+    let totalPoints = 0;
+    const timeBonus = Math.round((timeLeft / ROUND_TIME) * 50);
+    const confidenceBonus = Math.round(confidence * 50);
+    
+    if (success) {
+      totalPoints = 100 + timeBonus + confidenceBonus;
+    }
+
+    // In multiplayer mode, submit result to Firebase
+    if ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode && playerId) {
+      try {
+        await MultiplayerService.submitRoundResult(
+          roomCode,
+          playerId.replace('me', playerId), // Use real player ID
+          success,
+          confidence,
+          timeLeft
+        );
+        
+        // The score update will come from Firebase subscription
+        // No need to update local state manually
+      } catch (error) {
+        console.error('Error submitting round result:', error);
+      }
+    } else {
+      // Classic mode - update scores locally
+      if (gameMode === 'RACE' && success) {
+        setPlayers(prevPlayers => 
+          prevPlayers.map(p => 
+            p.id === 'me' ? { ...p, score: p.score + totalPoints } : p
+          )
+        );
+      } else if (gameMode === 'TEAM') {
+        // In Team mode, update scores based on winner
+        if (winner === 'TEAM') {
+          setPlayers(prevPlayers => 
+            prevPlayers.map(p => 
+              p.id !== 'me' ? { ...p, score: p.score + 5 } : p
+            )
+          );
+        }
+      }
+    }
+
+    // Save drawing locally
+    const newDrawings = [...drawings, { word: currentWord, imageData, success, winner }];
+    setDrawings(newDrawings);
+
+    const totalRounds = gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC;
+
+    // In multiplayer mode, host handles round transitions via Firebase
+    if ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode && isHost) {
+      // Wait a bit for other players to submit, then advance round
+      setTimeout(async () => {
+        try {
+          if (round < totalRounds) {
+            await MultiplayerService.nextRound(roomCode, wordsToDrawFr);
+          } else {
+            await MultiplayerService.endGame(roomCode);
+          }
+        } catch (error) {
+          console.error('Error advancing round:', error);
+        }
+      }, 2000); // Wait 2 seconds for other players
+    } else if (gameMode === 'CLASSIC') {
+      // Classic mode - handle locally
+      if (round < totalRounds) {
+        setShowOverlay(false);
+        setTimeout(() => {
+          setRound(round + 1);
+          prepareRound(round + 1);
+        }, 600);
+      } else {
+        setGameState('GAME_OVER');
+      }
+    }
+    // In multiplayer non-host mode, state updates come from Firebase subscription
+  };
+
+  // --- RENDER ---
+  return (
+    <div className="min-h-screen bg-[#ECECEC] font-['Architects_Daughter'] text-[#333] overflow-hidden select-none relative">
+      <style>
+        {`
+          @import url('https://fonts.googleapis.com/css2?family=Architects+Daughter&display=swap');
+          body { font-family: 'Architects Daughter', cursive; }
+          .btn-shadow { box-shadow: 4px 4px 0px 0px rgba(0,0,0,1); }
+          .btn-shadow:active { box-shadow: 2px 2px 0px 0px rgba(0,0,0,1); transform: translate(2px, 2px); }
+          /* Curtain Animation Classes */
+          .curtain-enter { transform: translateY(-100%); }
+          .curtain-active { transform: translateY(0); transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+          .curtain-exit { transform: translateY(0); }
+          .curtain-exit-active { transform: translateY(-100%); transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        `}
+      </style>
+
+      {gameState === 'WELCOME' && <WelcomeScreen onStart={goToModeSelect} />}
+      
+      {gameState === 'MODE_SELECT' && (
+        <GameModeSelection 
+          onSelectClassic={startClassicGame}
+          onSelectRace={() => startMultiplayerGame('RACE')}
+          onSelectTeam={() => startMultiplayerGame('TEAM')}
+        />
+      )}
+
+      {gameState === 'LOBBY_FLOW' && (
+        <MultiplayerFlow
+          mode={gameMode}
+          onBack={leaveMultiplayerGame}
+          onStartGame={startGameFromLobby}
+          players={players}
+          roomCode={roomCode}
+          playerId={playerId}
+          isHost={isHost}
+          onJoined={handleMultiplayerJoined}
+          onGameUpdate={handleGameUpdate}
+          wordsToDrawFr={wordsToDrawFr}
+        />
+      )}
+
+      {/* LOGIC: We keep DrawingScreen mounted during the game. 
+        The TransitionOverlay sits ON TOP and slides up/down.
+      */}
+      {gameState === 'PLAYING' && (
+        <>
+          <DrawingScreen 
+            word={currentWord} 
+            round={round}
+            gameMode={gameMode}
+            players={players}
+            totalRounds={gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC}
+            // Pause timer if overlay is visible
+            isPaused={showOverlay} 
+            onComplete={handleRoundComplete}
+            onQuit={() => setGameState('WELCOME')}
+            // Team mode props
+            roomCode={roomCode}
+            playerId={playerId}
+            currentDrawerId={gameData?.currentDrawerId}
+            gameData={gameData}
+            isHost={isHost}
+            // AI Score props
+            globalAiScore={globalAiScore}
+            onAiScoreUpdate={setGlobalAiScore}
+          />
+          
+          <TransitionOverlay 
+            isVisible={showOverlay}
+            word={currentWord}
+            round={round}
+            totalRounds={gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC}
+            onDismiss={() => setShowOverlay(false)}
+            // Multiplayer props
+            isMultiplayer={(gameMode === 'RACE' || gameMode === 'TEAM') && !!roomCode}
+            gameMode={gameMode}
+            roomCode={roomCode}
+            playerId={playerId}
+            players={players}
+            roundStatus={gameData?.roundStatus || ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode ? 'waiting' : 'playing')}
+            currentDrawerId={gameData?.currentDrawerId}
+            onForceStart={handleForceStartRound}
+          />
+        </>
+      )}
+
+      {gameState === 'GAME_OVER' && (
+        <GameOverScreen 
+          drawings={drawings}
+          gameMode={gameMode}
+          players={players}
+          aiScore={globalAiScore}
+          onRestart={goToModeSelect}
+        />
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// ATOMIZED COMPONENTS
+// =============================================================================
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center z-10 relative">
+      <div className="mb-8 relative">
+        <h1 className="text-6xl md:text-8xl font-bold tracking-tight text-blue-600">
+          Swift, Sketch
+        </h1>
+        <div className="absolute -top-6 -right-8 transform rotate-12 text-black opacity-10 text-9xl pointer-events-none">
+          ✎
+        </div>
+      </div>
+      
+      <p className="text-2xl md:text-3xl max-w-2xl mb-12 leading-relaxed">
+        Un réseau de neurones peut-il apprendre à reconnaître vos gribouillages ?
+      </p>
+      
+      <button 
+        onClick={onStart}
+        className="btn-shadow bg-blue-600 text-white border-4 border-black text-3xl px-12 py-4 rounded-sm hover:bg-blue-500 transition-colors duration-200 font-bold tracking-wider"
+      >
+        C'est parti !
+      </button>
+
+      <div className="mt-20 text-gray-500 text-sm flex gap-4">
+        <span>À propos</span>
+        <span>•</span>
+        <span>Confidentialité</span>
+      </div>
+    </div>
+  );
+}
+
+// New Component: Game Mode Selection Curtain
+function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
+  const [renderState, setRenderState] = useState('hidden');
+
+  useEffect(() => {
+    // Start entry animation on mount
+    setRenderState('entering');
+    setTimeout(() => setRenderState('visible'), 50);
+  }, []);
+
+  const getTransformClass = () => {
+    if (renderState === 'entering') return 'translate-y-[-100%]';
+    if (renderState === 'visible') return 'translate-y-0';
+    return 'translate-y-[-100%]';
+  };
+
+  return (
+    <div 
+      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#ECECEC] transition-transform duration-500 ease-in-out ${getTransformClass()}`}
+      style={{ willChange: 'transform' }}
+    >
+      <div className="bg-white p-8 md:p-12 rounded-sm border-4 border-black text-center shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-4xl w-full mx-4">
+        <h2 className="text-4xl md:text-5xl font-bold mb-8 text-blue-600">Choisissez un mode</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Classic Mode */}
+          <button 
+            onClick={onSelectClassic}
+            className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
+          >
+            <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
+               <User size={32} className="text-white" />
+            </div>
+            <h3 className="text-2xl font-bold mb-2">Classique</h3>
+            <p className="text-gray-500 text-sm">Mode Solo. Dessinez 6 objets et défiez l'IA.</p>
+          </button>
+
+          {/* Race Mode */}
+          <button 
+            onClick={onSelectRace}
+            className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
+          >
+             <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
+               <Zap size={32} className="text-white"/>
+            </div>
+            <h3 className="text-2xl font-bold mb-2">Course</h3>
+            <p className="text-gray-500 text-sm">Multijoueur. Soyez le plus rapide à faire deviner (6 manches).</p>
+          </button>
+
+          {/* Team Mode */}
+          <button 
+            onClick={onSelectTeam}
+            className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
+          >
+             <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
+               <Users size={32} className="text-white"/>
+            </div>
+            <h3 className="text-2xl font-bold mb-2">Team vs IA</h3>
+            <p className="text-gray-500 text-sm">Coop. Dessinez ensemble pour battre l'IA.</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The sliding panel (Curtain) - supports multiplayer sync
+function TransitionOverlay({ 
+  isVisible, 
+  word, 
+  round, 
+  totalRounds, 
+  onDismiss,
+  // Multiplayer props
+  isMultiplayer = false,
+  gameMode = 'CLASSIC',
+  roomCode = '',
+  playerId = '',
+  players = [],
+  roundStatus = 'playing', // 'waiting' or 'playing'
+  currentDrawerId = null, // For TEAM mode
+  onForceStart = null
+}) {
+  // We use internal state to handle the CSS transition classes
+  const [renderState, setRenderState] = useState('hidden'); // hidden, entering, visible, exiting
+  const [countdown, setCountdown] = useState(5);
+  const [hasClickedReady, setHasClickedReady] = useState(false);
+  const countdownStartedRef = useRef(false);
+  
+  // Check if current player is the drawer (TEAM mode)
+  const isDrawer = gameMode === 'TEAM' && currentDrawerId === playerId;
+  const isTeamMode = gameMode === 'TEAM';
+  
+  // Find drawer info
+  const drawerPlayer = isTeamMode ? players.find(p => p.id === currentDrawerId || (p.id === 'me' && currentDrawerId === playerId)) : null;
+
+  useEffect(() => {
+    if (isVisible) {
+      setRenderState('entering');
+      setCountdown(5);
+      setHasClickedReady(false);
+      countdownStartedRef.current = false;
+      // Force reflow/next tick to start animation
+      setTimeout(() => setRenderState('visible'), 50);
+    } else {
+      setRenderState('exiting');
+      // Wait for animation to finish before hiding completely (if needed)
+      const timer = setTimeout(() => setRenderState('hidden'), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isVisible]);
+
+  // Countdown timer for multiplayer mode
+  useEffect(() => {
+    if (!isMultiplayer || !isVisible || roundStatus !== 'waiting') return;
+    
+    // Don't restart if already started
+    if (countdownStartedRef.current) return;
+    countdownStartedRef.current = true;
+    
+    console.log('🕐 Starting countdown for multiplayer round...');
+    setCountdown(5);
+    
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Force start after countdown
+          console.log('⏰ Countdown finished, forcing start...');
+          if (onForceStart && roomCode) {
+            onForceStart();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isMultiplayer, isVisible, roundStatus, onForceStart, roomCode]);
+
+  // When round starts (roundStatus changes to 'playing'), dismiss overlay
+  useEffect(() => {
+    console.log('🎯 TransitionOverlay roundStatus check:', { roundStatus, isMultiplayer, isVisible });
+    if (isMultiplayer && roundStatus === 'playing' && isVisible) {
+      console.log('✅ Dismissing overlay - roundStatus is playing');
+      onDismiss();
+    }
+  }, [roundStatus, isMultiplayer, isVisible, onDismiss]);
+  
+  // Fallback: also dismiss when countdown reaches 0 (force start triggered)
+  useEffect(() => {
+    if (isMultiplayer && countdown === 0 && isVisible) {
+      // Give a small delay for Firebase to update, then force dismiss
+      const timer = setTimeout(() => {
+        console.log('⚡ Force dismissing overlay after countdown');
+        onDismiss();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown, isMultiplayer, isVisible, onDismiss]);
+
+  const handleReadyClick = async () => {
+    console.log('🖱️ Ready clicked - isMultiplayer:', isMultiplayer, 'roomCode:', roomCode, 'playerId:', playerId, 'hasClickedReady:', hasClickedReady);
+    
+    if (isMultiplayer && roomCode && playerId && !hasClickedReady) {
+      setHasClickedReady(true);
+      try {
+        console.log('📤 Marking player ready:', playerId);
+        await MultiplayerService.markPlayerReady(roomCode, playerId);
+        console.log('✅ Player marked ready');
+      } catch (error) {
+        console.error('❌ Error marking ready:', error);
+        setHasClickedReady(false); // Reset so user can try again
+      }
+    } else if (!isMultiplayer) {
+      // Classic mode - just dismiss
+      onDismiss();
+    }
+  };
+
+  // Determine CSS class based on state
+  const getTransformClass = () => {
+    if (renderState === 'entering') return 'translate-y-[-100%]';
+    if (renderState === 'visible') return 'translate-y-0';
+    if (renderState === 'exiting') return 'translate-y-[-100%]';
+    return 'translate-y-[-100%]'; // hidden default
+  };
+
+  // Count ready players
+  const readyCount = players.filter(p => p.isReady).length;
+  const totalPlayers = players.length;
+
+  return (
+    <div 
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-[#ECECEC] transition-transform duration-500 ease-in-out ${getTransformClass()}`}
+      style={{ willChange: 'transform' }}
+    >
+       <div className="bg-white p-10 md:p-14 rounded-sm border-4 border-black text-center shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-2xl w-full mx-4">
+        
+        {/* TEAM mode - Different display for drawer vs guessers */}
+        {isTeamMode ? (
+          <>
+            <p className="text-2xl text-gray-500 mb-4">
+              Niveau {round}/{totalRounds}
+            </p>
+            
+            {isDrawer ? (
+              <>
+                <p className="text-lg text-blue-600 font-bold mb-2">🎨 C'est à vous de dessiner !</p>
+                <h2 className="text-5xl md:text-6xl font-bold mb-6 capitalize">{word}</h2>
+                <p className="text-xl text-gray-500 mb-6">Faites deviner ce mot à votre équipe !</p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg text-purple-600 font-bold mb-2">🔮 Devinez le dessin !</p>
+                <div className="flex items-center justify-center gap-2 mb-6">
+                  <span className="text-2xl">{drawerPlayer?.avatar || '🎨'}</span>
+                  <span className="text-xl font-bold">{drawerPlayer?.name || 'Un joueur'}</span>
+                  <span className="text-xl text-gray-500">dessine...</span>
+                </div>
+                <h2 className="text-5xl md:text-6xl font-bold mb-6 text-gray-300">? ? ?</h2>
+                <p className="text-xl text-gray-500 mb-6">Utilisez le chat pour proposer vos réponses !</p>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-2xl text-gray-500 mb-4">
+              Niveau {round}/{totalRounds} • Dessinez :
+            </p>
+            <h2 className="text-5xl md:text-6xl font-bold mb-10 capitalize">{word}</h2>
+            <p className="text-xl text-gray-500 mb-6">en moins de {ROUND_TIME} secondes</p>
+          </>
+        )}
+        
+        {/* Multiplayer status */}
+        {isMultiplayer && roundStatus === 'waiting' && (
+          <div className="mb-6">
+            <div className="flex justify-center items-center gap-2 mb-4">
+              <div className="flex -space-x-2">
+                {players.map(player => (
+                  <div 
+                    key={player.id} 
+                    className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-lg transition-all ${
+                      player.isReady 
+                        ? 'border-green-500 bg-green-100' 
+                        : 'border-gray-300 bg-gray-100'
+                    }`}
+                    title={`${player.name} ${player.isReady ? '✓' : '...'}`}
+                  >
+                    {player.avatar}
+                  </div>
+                ))}
+              </div>
+              <span className="text-sm font-bold text-gray-500 ml-2">
+                {readyCount}/{totalPlayers} prêts
+              </span>
+            </div>
+            {/* Countdown */}
+            <div className="text-4xl font-bold text-blue-600 mb-4">
+              {countdown > 0 ? countdown : '🚀'}
+            </div>
+            <p className="text-sm text-gray-400">
+              {countdown > 0 
+                ? `Démarrage automatique dans ${countdown}s` 
+                : 'Démarrage...'
+              }
+            </p>
+          </div>
+        )}
+        
+        <button 
+          onClick={handleReadyClick}
+          disabled={isMultiplayer && hasClickedReady && roundStatus === 'waiting'}
+          className={`btn-shadow border-4 border-black text-2xl px-10 py-3 rounded-sm transition-colors w-full md:w-auto font-bold ${
+            isMultiplayer && hasClickedReady && roundStatus === 'waiting'
+              ? 'bg-green-500 text-white cursor-default'
+              : 'bg-blue-600 text-white hover:bg-blue-500'
+          }`}
+        >
+          {isMultiplayer && hasClickedReady && roundStatus === 'waiting' 
+            ? '✓ Prêt !' 
+            : "C'est parti !"
+          }
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Multiplayer Flow Component (Lobby & Waiting Room)
+function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existingRoomCode, playerId: existingPlayerId, isHost: existingIsHost, onJoined, onGameUpdate, wordsToDrawFr }) {
+  const [step, setStep] = useState('LOBBY'); // LOBBY, WAITING_ROOM
+  const [localIsHost, setLocalIsHost] = useState(existingIsHost);
+  const [localRoomCode, setLocalRoomCode] = useState(existingRoomCode || '');
+  const [localPlayerId, setLocalPlayerId] = useState(existingPlayerId || '');
+  const [playerName, setPlayerName] = useState('Joueur');
+  const [playerEmoji, setPlayerEmoji] = useState('😎');
+  const [availableGames, setAvailableGames] = useState([]);
+  const [joinCode, setJoinCode] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Liste d'emojis disponibles
+  const availableEmojis = ['😎', '😺', '🤖', '🦊', '🐼', '🐸', '🦁', '🐯', '🐨', '🐻', '🎨', '🎮', '🌟', '🔥', '💎'];
+
+  // Mode specific styles - NOW ALL BLUE
+  const themeColor = 'bg-blue-600';
+  const themeText = 'text-blue-600';
+  const themeHover = 'hover:bg-blue-500';
+  
+  const modeName = mode === 'RACE' ? 'Mode Course' : 'Team vs IA';
+  const modeIcon = mode === 'RACE' ? <Zap size={40} className="text-white" /> : <Users size={40} className="text-white" />;
+
+  // Subscribe to available games list
+  useEffect(() => {
+    if (step !== 'LOBBY') return;
+
+    const unsubscribe = MultiplayerService.subscribeToAvailableGames(mode, (games) => {
+      setAvailableGames(games);
+    });
+
+    return () => unsubscribe();
+  }, [step, mode]);
+
+  // Subscribe to game updates when in waiting room
+  useEffect(() => {
+    if (step !== 'WAITING_ROOM' || !localRoomCode) return;
+
+    const unsubscribe = MultiplayerService.subscribeToGame(localRoomCode, (gameData) => {
+      if (gameData) {
+        onGameUpdate(gameData);
+        // Update local host status in case it changed
+        setLocalIsHost(gameData.hostId === localPlayerId);
+      } else {
+        // Game was deleted
+        setStep('LOBBY');
+        setError('La partie a été supprimée');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [step, localRoomCode, localPlayerId, onGameUpdate]);
+
+  // Heartbeat to keep player online
+  useEffect(() => {
+    if (step !== 'WAITING_ROOM' || !localRoomCode || !localPlayerId) return;
+
+    const interval = setInterval(() => {
+      MultiplayerService.updateHeartbeat(localRoomCode, localPlayerId);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [step, localRoomCode, localPlayerId]);
+
+  const handleCreateGame = async () => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.createGame(mode, playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(true);
+      onJoined(result.roomCode, result.playerId, true);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error creating game:', err);
+      setError(err.message || 'Erreur lors de la création');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinGameByCode = async () => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom');
+      return;
+    }
+    if (!joinCode.trim()) {
+      setError('Entrez le code de la partie');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.joinGame(joinCode.toUpperCase().trim(), playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(false);
+      onJoined(result.roomCode, result.playerId, false);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error joining game:', err);
+      setError(err.message || 'Erreur lors de la connexion');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinExistingGame = async (code) => {
+    if (!playerName.trim()) {
+      setError('Entrez votre nom d\'abord');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const result = await MultiplayerService.joinGame(code, playerName.trim(), playerEmoji);
+      setLocalRoomCode(result.roomCode);
+      setLocalPlayerId(result.playerId);
+      setLocalIsHost(false);
+      onJoined(result.roomCode, result.playerId, false);
+      setStep('WAITING_ROOM');
+    } catch (err) {
+      console.error('Error joining game:', err);
+      setError(err.message || 'Erreur lors de la connexion');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLeaveWaitingRoom = async () => {
+    if (localRoomCode && localPlayerId) {
+      try {
+        await MultiplayerService.leaveGame(localRoomCode, localPlayerId);
+      } catch (err) {
+        console.error('Error leaving game:', err);
+      }
+    }
+    setLocalRoomCode('');
+    setLocalPlayerId('');
+    setLocalIsHost(false);
+    setStep('LOBBY');
+  };
+
+  const copyRoomCode = () => {
+    navigator.clipboard.writeText(localRoomCode);
+  };
+
+  if (step === 'LOBBY') {
+    return (
+      <div className="min-h-screen flex flex-col items-center pt-12 px-4 bg-[#ECECEC]">
+        <div className="w-full max-w-4xl">
+          <div className="flex items-center mb-8 relative">
+            <button onClick={onBack} className="absolute left-0 p-2 hover:bg-white/50 rounded-full transition-colors"><X size={32} /></button>
+            <h2 className={`text-4xl font-bold text-center w-full ${themeText} flex items-center justify-center gap-3`}>
+              {mode === 'RACE' ? <Zap size={40} /> : <Users size={40} />} {modeName}
+            </h2>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-sm text-red-700 font-bold text-center">
+              {error}
+            </div>
+          )}
+
+          {/* Player Profile Setup */}
+          <div className="mb-8 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <User size={24} /> Votre profil
+            </h3>
+            <div className="flex flex-col md:flex-row gap-4 items-center">
+              {/* Emoji Selector */}
+              <div className="flex flex-col items-center gap-2">
+                <div className="text-6xl">{playerEmoji}</div>
+                <div className="flex flex-wrap gap-2 justify-center max-w-xs">
+                  {availableEmojis.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => setPlayerEmoji(emoji)}
+                      className={`text-2xl p-1.5 rounded-lg border-2 transition-all hover:scale-110 ${
+                        playerEmoji === emoji 
+                          ? 'border-blue-600 bg-blue-50 scale-110' 
+                          : 'border-gray-300 hover:border-blue-400'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Name Input */}
+              <div className="flex-1 w-full">
+                <label className="block text-sm font-bold text-gray-600 mb-2">Nom du joueur</label>
+                <input 
+                  type="text" 
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="Votre pseudo" 
+                  className="w-full p-4 border-2 border-gray-300 rounded-sm font-bold text-xl outline-none focus:border-blue-600 transition-colors" 
+                  maxLength={15}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-8">
+            {/* CREATE */}
+            <div className="flex-1 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+              <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><Plus size={28} /> Créer une partie</h3>
+              <p className="text-gray-600 mb-4">Créez votre propre salon et invitez vos amis !</p>
+              <button 
+                onClick={handleCreateGame} 
+                disabled={isLoading}
+                className={`w-full py-4 ${themeColor} text-white border-4 border-black font-bold text-xl rounded-sm btn-shadow ${themeHover} transition-all disabled:opacity-50 flex items-center justify-center gap-2`}
+              >
+                {isLoading ? <Loader2 className="animate-spin" size={24} /> : null}
+                Créer le salon
+              </button>
+            </div>
+            
+            {/* JOIN BY CODE */}
+            <div className="flex-1 bg-white p-6 rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+              <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><LogIn size={28} /> Rejoindre par code</h3>
+              <div className="flex gap-2 mb-4">
+                <input 
+                  type="text" 
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="CODE" 
+                  className="flex-1 p-3 border-2 border-gray-300 rounded-sm font-bold text-xl outline-none focus:border-blue-600 text-center uppercase tracking-widest" 
+                  maxLength={4}
+                />
+                <button 
+                  onClick={handleJoinGameByCode}
+                  disabled={isLoading}
+                  className={`px-6 ${themeColor} text-white border-2 border-black font-bold rounded-sm btn-shadow ${themeHover} disabled:opacity-50`}
+                >
+                  OK
+                </button>
+              </div>
+              
+              {/* Available Games List */}
+              <div className="border-t-2 border-gray-200 pt-4">
+                <p className="text-sm font-bold text-gray-500 mb-3">Parties disponibles</p>
+                {availableGames.length === 0 ? (
+                  <p className="text-center text-gray-400 py-4 italic">Aucune partie disponible</p>
+                ) : (
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {availableGames.map(game => (
+                      <div key={game.roomCode} className="flex justify-between items-center p-3 border-2 border-gray-100 hover:border-blue-400 bg-gray-50 rounded-sm transition-colors">
+                        <div>
+                          <div className="font-bold">{game.hostName}</div>
+                          <div className="text-xs text-gray-500">{game.playerCount}/{game.maxPlayers} Joueurs • {game.roomCode}</div>
+                        </div>
+                        <button 
+                          onClick={() => handleJoinExistingGame(game.roomCode)}
+                          disabled={isLoading}
+                          className="px-4 py-2 bg-white border-2 border-black text-sm font-bold rounded-sm hover:bg-blue-50 disabled:opacity-50"
+                        >
+                          Rejoindre
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // WAITING ROOM
+  return (
+    <div className="min-h-screen flex flex-col items-center pt-12 px-4 bg-[#ECECEC]">
+      <div className="w-full max-w-4xl bg-white rounded-sm border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
+        <div className={`${themeColor} text-white p-6 border-b-4 border-black flex justify-between items-center`}>
+           <button onClick={handleLeaveWaitingRoom} className="p-2 hover:bg-white/20 rounded-full" title="Quitter">
+             <X size={24} />
+           </button>
+           <div className="text-center">
+             <p className="text-sm font-bold uppercase opacity-80">Code de la partie</p>
+             <button 
+               onClick={copyRoomCode}
+               className="text-4xl font-bold flex items-center gap-2 justify-center hover:opacity-80 transition-opacity"
+               title="Copier le code"
+             >
+               {localRoomCode} <Copy size={20} className="opacity-70" />
+             </button>
+           </div>
+           <div className="w-10"></div> 
+        </div>
+
+        <div className="p-8">
+           <h3 className="text-2xl font-bold flex items-center gap-2 mb-6"><Users size={28} /> Joueurs ({players.length}/8)</h3>
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+             {players.map(player => (
+               <div 
+                 key={player.id} 
+                 className={`flex flex-col items-center p-4 rounded-sm border-2 transition-all ${
+                   player.id === 'me' 
+                     ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-200' 
+                     : 'bg-gray-50 border-gray-200'
+                 }`}
+               >
+                 <div className="text-5xl mb-2">{player.avatar}</div>
+                 <div className="font-bold text-lg flex items-center gap-1">
+                   {player.name}
+                   {player.isHost && <span title="Hôte">👑</span>}
+                 </div>
+                 {player.id === 'me' && <span className="text-xs text-blue-600 font-bold">(vous)</span>}
+               </div>
+             ))}
+             {[...Array(Math.max(0, 8 - players.length))].map((_, i) => (
+                <div key={i} className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-sm opacity-50">
+                  <div className="text-3xl text-gray-300">?</div>
+                </div>
+             ))}
+           </div>
+           
+           <div className="flex justify-center">
+              {localIsHost ? (
+                <button 
+                  onClick={onStartGame} 
+                  disabled={players.length < 2 || isLoading}
+                  className={`px-12 py-4 border-4 border-black text-2xl font-bold rounded-sm ${themeColor} text-white btn-shadow ${themeHover} flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {isLoading ? <Loader2 className="animate-spin" size={28} /> : <Play size={28} fill="currentColor" />}
+                  {players.length < 2 ? 'En attente de joueurs...' : 'Lancer la partie'}
+                </button>
+              ) : (
+                 <div className="text-center p-4 bg-yellow-50 border-2 border-[#FFD154] rounded-sm">
+                   <p className="text-xl font-bold text-gray-700 animate-pulse flex items-center gap-2">
+                     <Loader2 className="animate-spin" size={20} />
+                     En attente de l'hôte...
+                   </p>
+                 </div>
+              )}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// DrawingScreen is now imported from './components/game/DrawingScreen'
+// The old 1000+ lines implementation has been split into:
+// - hooks/ : useDrawing, usePredictions, useGameTimer, useTeamSync
+// - components/ : DrawingCanvas, GameHeader, TeamChat, AIFeedback
+// - index.jsx : Main orchestrator component
+
+
+// =============================================================================
+// ATOMIZED COMPONENTS
+// =============================================================================
+// All major UI components have been extracted to separate files:
+// - WelcomeScreen: ./components/game/WelcomeScreen
+// - GameModeSelection: ./components/game/GameModeSelection  
+// - TransitionOverlay: ./components/game/TransitionOverlay
+// - MultiplayerFlow: ./components/game/MultiplayerFlow
+// - GameOverScreen: ./components/game/GameOverScreen
+// - DrawingScreen: ./components/game/DrawingScreen (with hooks & sub-components)
+//
+// DrawingScreen structure:
+//   - hooks/ : useDrawing, usePredictions, useGameTimer, useTeamSync
+//   - components/ : DrawingCanvas, GameHeader, TeamChat, AIFeedback
+//   - index.jsx : Main orchestrator component
+// =============================================================================

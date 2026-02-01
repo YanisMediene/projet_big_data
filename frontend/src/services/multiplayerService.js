@@ -319,6 +319,13 @@ export const nextRound = async (roomCode, categories) => {
   const gameData = snapshot.val();
   const nextRoundNum = (gameData.currentRound || 0) + 1;
   
+  // Prevent duplicate calls - check if we're already in the next round
+  // This can happen when multiple players call nextRound simultaneously in RACE mode
+  if (gameData.roundStatus === 'waiting' && gameData.currentRound === nextRoundNum) {
+    console.log('⚠️ Round already advanced, skipping duplicate nextRound call');
+    return;
+  }
+  
   if (nextRoundNum > gameData.maxRounds) {
     // Game over
     await update(gameRef, {

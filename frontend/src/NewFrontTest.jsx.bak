@@ -4,22 +4,22 @@ import { predictDrawing, getCategories } from './services/api';
 import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
 import * as MultiplayerService from './services/multiplayerService';
 
-// --- CONSTANTES GLOBALES ---
-const TOTAL_ROUNDS_CLASSIC = 6;
-const TOTAL_ROUNDS_RACE = 6;
-const ROUND_TIME = 20;
+// Atomized components
+import WelcomeScreen from './components/game/WelcomeScreen';
+import GameModeSelection from './components/game/GameModeSelection';
+import TransitionOverlay from './components/game/TransitionOverlay';
+import MultiplayerFlow from './components/game/MultiplayerFlow';
+import GameOverScreen from './components/game/GameOverScreen';
+import DrawingScreen from './components/game/DrawingScreen';
 
-const WRONG_GUESSES = [
-  "un truc", "aucune idée", "c'est quoi ça ?", "un ovni", 
-  "bizarre...", "un chien ?", "une table ?", "abstrait"
-];
-
-const INITIAL_MOCK_PLAYERS = [
-  { id: 1, name: "Toi", score: 0 },
-  { id: 2, name: "Bot1", score: 0 },
-  { id: 3, name: "Bot2", score: 0 },
-  { id: 4, name: "Bot3", score: 0 },
-];
+// Constants
+import {
+  TOTAL_ROUNDS_CLASSIC,
+  TOTAL_ROUNDS_RACE,
+  ROUND_TIME,
+  WRONG_GUESSES,
+  INITIAL_MOCK_PLAYERS
+} from './constants/gameConstants';
 
 // --- MAIN COMPONENT ---
 export default function QuickDrawApp() {
@@ -305,23 +305,9 @@ export default function QuickDrawApp() {
 
     const totalRounds = gameMode === 'RACE' ? TOTAL_ROUNDS_RACE : TOTAL_ROUNDS_CLASSIC;
 
-    // In multiplayer mode RACE: any player who wins advances the round
-    // In TEAM mode: only host handles transitions
-    if (gameMode === 'RACE' && roomCode && success) {
-      // In RACE mode, the winner triggers the round transition
-      setTimeout(async () => {
-        try {
-          if (round < totalRounds) {
-            await MultiplayerService.nextRound(roomCode, wordsToDrawFr);
-          } else {
-            await MultiplayerService.endGame(roomCode);
-          }
-        } catch (error) {
-          console.error('Error advancing round:', error);
-        }
-      }, 2000); // Wait 2 seconds for animations
-    } else if (gameMode === 'TEAM' && roomCode && isHost) {
-      // In TEAM mode, only host advances rounds
+    // In multiplayer mode, host handles round transitions via Firebase
+    if ((gameMode === 'RACE' || gameMode === 'TEAM') && roomCode && isHost) {
+      // Wait a bit for other players to submit, then advance round
       setTimeout(async () => {
         try {
           if (round < totalRounds) {
@@ -1133,25 +1119,13 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
   );
 }
 
-function DrawingScreen({ 
-  word, 
-  round, 
-  gameMode = 'CLASSIC', 
-  players = [], 
-  totalRounds, 
-  isPaused, 
-  onComplete, 
-  onQuit,
-  // Team mode props
-  roomCode = '',
-  playerId = '',
-  currentDrawerId = null,
-  gameData = null,
-  isHost = false,
-  // AI Score props
-  globalAiScore = 0,
-  onAiScoreUpdate = null
-}) {
+// DrawingScreen is now imported from './components/game/DrawingScreen'
+// The old 1000+ lines implementation has been split into:
+// - hooks/ : useDrawing, usePredictions, useGameTimer, useTeamSync
+// - components/ : DrawingCanvas, GameHeader, TeamChat, AIFeedback
+// - index.jsx : Main orchestrator component
+
+function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore = 0, onRestart }) {
   const canvasRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(ROUND_TIME);
   const [aiText, setAiText] = useState("Je ne vois rien pour l'instant...");
