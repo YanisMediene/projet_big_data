@@ -2,8 +2,8 @@
 
 Vue d'ensemble complète de l'état d'avancement du projet, des fonctionnalités implémentées, et de la roadmap.
 
-**Dernière mise à jour :** 6 décembre 2025  
-**Phase actuelle :** Phase 2 (100% ✓)
+**Dernière mise à jour :** 1 février 2026  
+**Phase actuelle :** Phase 2+ (Team vs IA ✓)
 
 ---
 
@@ -26,8 +26,8 @@ Vue d'ensemble complète de l'état d'avancement du projet, des fonctionnalités
 Créer une application web interactive de dessin avec reconnaissance par CNN, intégrant :
 - Prédictions en temps réel avec TensorFlow
 - Active Learning pour amélioration continue du modèle
-- Modes multijoueurs compétitifs
-- Infrastructure cloud scalable (Firebase + Cloud Run)
+- Modes multijoueurs compétitifs (Race Mode + Team vs IA)
+- Infrastructure cloud scalable (Firebase + Cloud Run + Realtime Database)
 
 ### 📈 Progression Globale
 
@@ -266,6 +266,64 @@ openssl rand -hex 32
 - ✅ Progression entre rounds
 - ✅ Leaderboard temps réel
 - ✅ UI responsive (sidebar joueurs + zone dessin)
+
+---
+
+### ✅ 4b. Team vs IA Mode (100%) - NOUVEAU
+
+**Concept :** Mode coopératif où une équipe humaine affronte l'IA. Un dessinateur dessine tandis que les autres joueurs (guessers) devinent via chat avant l'IA.
+
+**Fichiers Frontend :**
+- `frontend/src/services/multiplayerService.js` - Service Firebase RTDB
+- `frontend/src/hooks/usePresence.js` - Système de présence online/offline
+- `frontend/src/components/ConnectionStatus.jsx` - Indicateur connexion
+- `frontend/src/components/Toast.jsx` - Notifications toast
+- `frontend/src/NewFrontTest.jsx` - Intégration mode Team
+
+**Fichiers Backend :**
+- `backend/services/presence_service.py` - Service présence RTDB
+- `database.rules.json` - Règles sécurité Realtime Database
+
+**Architecture Temps Réel (Firebase Realtime Database) :**
+```
+games/${roomCode}/
+├── currentDrawing      # PNG base64 du dessin (sync 100ms)
+├── chat/               # Messages des guessers
+│   └── ${messageId}
+│       ├── text
+│       ├── senderName
+│       └── timestamp
+├── currentRound        # Round actuel
+├── currentDrawerId     # UID du dessinateur
+├── aiGuessedCorrectly  # Flag victoire IA
+├── players/            # Joueurs connectés
+│   └── ${playerId}
+│       ├── name
+│       ├── score
+│       └── isOnline
+└── presence/           # Système de présence
+    └── ${playerId}
+        ├── lastSeen
+        └── status
+```
+
+**Fonctionnalités :**
+- ✅ Synchronisation dessin temps réel (drawer → viewers)
+- ✅ Compression PNG (0.5 quality) pour performance
+- ✅ Chat pour guessers (texte + validation réponse)
+- ✅ Rotation automatique du dessinateur
+- ✅ Détection présence (online/offline via heartbeat)
+- ✅ Indicateur statut connexion (ConnectionStatus)
+- ✅ Notifications toast pour événements jeu
+- ✅ Séparation canvas drawer (interactif) vs viewer (lecture seule)
+
+**Règles du Jeu :**
+- 2-6 joueurs + 1 IA
+- Dessinateur tourne à chaque round
+- Guessers tapent leurs réponses dans le chat
+- L'IA tente de deviner en parallèle (via `/predict`)
+- Points : équipe si humain devine avant IA, IA sinon
+- 10 rounds total
 
 ---
 

@@ -27,6 +27,7 @@ AI Pictionary utilise une architecture cloud moderne :
 |---------|-------|--------------|
 | **Firebase Authentication** | Google + Email/Password auth | Global |
 | **Firestore Database** | NoSQL (users, sessions, corrections, games) | europe-west1 |
+| **Firebase Realtime Database** | Multiplayer sync (Team vs IA, drawing, chat, presence) | us-central1 |
 | **Firebase Storage** | Drawings, models, datasets | europe-west1 |
 | **Firebase Hosting** | Frontend CDN | Global |
 | **Google Cloud Run** | Backend API (FastAPI + TensorFlow) | europe-west1 |

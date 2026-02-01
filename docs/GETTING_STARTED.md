@@ -259,12 +259,18 @@ npm start
 - [ ] Frontend démarre sans erreur sur port 3000
 - [ ] Navigation fonctionne entre pages
 
+**Firebase Realtime Database (pour Team vs IA) :**
+- [ ] `REACT_APP_FIREBASE_DATABASE_URL` configuré dans `.env`
+- [ ] Règles RTDB déployées (`firebase deploy --only database`)
+- [ ] Émulateur RTDB démarré si dev local (`REACT_APP_USE_RTDB_EMULATOR=true`)
+
 **Tests Rapides :**
 - [ ] Page principale (/) affiche le canvas
 - [ ] Page multiplayer (/multiplayer) accessible
 - [ ] Page settings (/settings) affiche les options
 - [ ] Prédictions temps réel fonctionnent
 - [ ] Modal de correction apparaît (<85% confiance)
+- [ ] Mode Team vs IA : viewers voient le dessin en temps réel
 
 ---
 

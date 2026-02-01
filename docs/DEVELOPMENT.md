@@ -47,6 +47,9 @@ REACT_APP_FIREBASE_STORAGE_BUCKET=ai-pictionary-4f8f2.appspot.com
 REACT_APP_FIREBASE_MESSAGING_SENDER_ID=123456789012
 REACT_APP_FIREBASE_APP_ID=1:123456789012:web:abcd...
 
+# Firebase Realtime Database (pour mode Team vs IA)
+REACT_APP_FIREBASE_DATABASE_URL=https://ai-pictionary-4f8f2-default-rtdb.firebaseio.com
+
 # Backend API (local ou production)
 REACT_APP_API_BASE_URL=http://localhost:8000
 # OU pour tester contre production :
@@ -54,6 +57,7 @@ REACT_APP_API_BASE_URL=http://localhost:8000
 
 # Émulateurs (optionnel)
 REACT_APP_USE_EMULATOR=true
+REACT_APP_USE_RTDB_EMULATOR=true  # Pour émulateur RTDB
 ```
 
 #### Backend (.env)

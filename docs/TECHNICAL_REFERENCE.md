@@ -1,8 +1,8 @@
 # 📚 Technical Reference Guide
 
 **AI Pictionary - Big Data Project FISE3**  
-**Version:** 1.0.0  
-**Last Updated:** January 30, 2026
+**Version:** 1.1.0  
+**Last Updated:** February 1, 2026
 
 ---
 
@@ -27,8 +27,8 @@
 AI Pictionary est une application cloud-native de reconnaissance de dessins inspirée de "Quick, Draw!" de Google. Le système démontre :
 - Inférence CNN en temps réel (<10ms de latence)
 - Apprentissage actif avec feedback utilisateur
-- Architecture cloud-native (Firebase Auth + Firestore + Storage)
-- Capacités multijoueur via Firestore real-time listeners
+- Architecture cloud-native (Firebase Auth + Firestore + Storage + Realtime Database)
+- Capacités multijoueur via Firestore real-time listeners et Realtime Database (Team vs IA)
 
 ### Tech Stack
 
@@ -38,6 +38,7 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 | **Backend** | FastAPI (Python) | 0.109.2 | Async native, auto OpenAPI docs |
 | **ML Engine** | TensorFlow/Keras | 2.16.2 | Industry standard, excellent documentation |
 | **Cloud** | Firebase + Cloud Run | 10.8.0 / europe-west1 | Seamless integration, cost-effective |
+| **Real-time Sync** | Firebase RTDB | 10.8.0 | Low-latency drawing sync (<50ms) |
 | **Dataset** | Google Quick Draw | 1.4M images (20 categories) | High-quality labeled data |
 
 ### Key Performance Metrics
@@ -151,6 +152,51 @@ onSnapshot(doc(db, 'games', gameId), (docSnap) => {
   const gameState = docSnap.data();
   updateUI(gameState);  // <100ms latency globally
 });
+```
+
+---
+
+### 2b. Firebase Realtime Database vs Firestore for Drawing Sync
+
+| Aspect | Firestore | RTDB ✅ |
+|--------|-----------|---------|
+| **Latency** | 100-200ms | 20-50ms |
+| **Update Frequency** | Limited (1/sec per doc) | High (10+/sec) |
+| **Data Structure** | Documents/Collections | JSON tree |
+| **Offline Support** | ✅ Full | ⚠️ Basic |
+| **Cost Model** | Read/write ops | Data transferred |
+| **Use Case** | Game state, users | Drawing sync, presence |
+
+**Verdict:** ✅ **Firebase RTDB** chosen for Team vs IA mode because:
+
+1. **Lower Latency:** 20-50ms vs 100-200ms critical for real-time drawing
+2. **Higher Update Frequency:** Drawer sends canvas every 100ms
+3. **Better for Ephemeral Data:** Drawing data, presence (not persisted long-term)
+4. **Cost-Effective for Sync:** Billed by data transferred, not operations
+
+**Architecture Decision:**
+- **Firestore:** Users, sessions, corrections, game metadata (persistent)
+- **RTDB:** Drawing sync, chat messages, presence (ephemeral real-time)
+
+**Implementation Example:**
+```javascript
+// RTDB for drawing sync (Team vs IA)
+import { ref, onValue, set } from 'firebase/database';
+import { rtdb } from '../firebase';
+
+// Drawer syncs canvas every 100ms
+export const updateDrawingData = (roomCode, drawingData) => {
+  const drawingRef = ref(rtdb, `games/${roomCode}/currentDrawing`);
+  return set(drawingRef, drawingData);
+};
+
+// Viewer subscribes to drawing updates
+export const subscribeToDrawing = (roomCode, callback) => {
+  const drawingRef = ref(rtdb, `games/${roomCode}/currentDrawing`);
+  return onValue(drawingRef, (snapshot) => {
+    callback(snapshot.val());
+  });
+};
 ```
 
 ---
