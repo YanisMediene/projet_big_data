@@ -4,6 +4,9 @@ import { predictDrawing, getCategories } from './services/api';
 import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
 import * as MultiplayerService from './services/multiplayerService';
 
+// Backend API URL
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+
 // --- CONSTANTES GLOBALES ---
 const TOTAL_ROUNDS_CLASSIC = 6;
 const TOTAL_ROUNDS_RACE = 6;
@@ -458,7 +461,7 @@ function WelcomeScreen({ onStart }) {
     const checkBackendHealth = async () => {
       setBackendStatus('checking');
       try {
-        const response = await fetch('http://localhost:8000/health', { 
+        const response = await fetch(`${API_BASE_URL}/health`, { 
           method: 'GET',
           signal: AbortSignal.timeout(3000) // 3 second timeout
         });
