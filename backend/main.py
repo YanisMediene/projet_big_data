@@ -18,6 +18,7 @@ import firebase_admin
 from firebase_admin import credentials, auth
 from middleware.rate_limit import RateLimitMiddleware
 from routers import admin, games
+from config import CATEGORIES, MODEL_VERSION
 
 # Load environment variables
 load_dotenv()
@@ -51,37 +52,6 @@ app.include_router(games.router)
 
 # Global variables
 model = None
-MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
-CATEGORIES = os.getenv("CATEGORIES", "").split(",")
-
-
-# Validate categories order on startup
-def validate_categories_order():
-    """Validate that CATEGORIES order matches the model metadata."""
-    try:
-        metadata_path = f"./models/quickdraw_{MODEL_VERSION}_metadata.json"
-        if os.path.exists(metadata_path):
-            with open(metadata_path, "r") as f:
-                metadata = json.load(f)
-                expected_categories = metadata.get("categories", [])
-
-                if CATEGORIES != expected_categories:
-                    print("\n⚠️  WARNING: Category order mismatch detected!")
-                    print("   Expected (from model metadata):")
-                    print(f"   {expected_categories}")
-                    print("   Current (from .env):")
-                    print(f"   {CATEGORIES}")
-                    print("   ⚠️  This will cause INCORRECT predictions!\n")
-                    return False
-                else:
-                    print("✅ Category order validation: PASSED")
-                    return True
-        else:
-            print(f"⚠️  Metadata file not found: {metadata_path}")
-            return False
-    except Exception as e:
-        print(f"⚠️  Error validating categories: {e}")
-        return False
 
 
 # Firebase initialization
@@ -107,8 +77,7 @@ try:
 except Exception as e:
     print(f"⚠️  Firebase initialization failed: {e}")
 
-# Run category validation on startup
-validate_categories_order()
+# Categories are now loaded dynamically from metadata (see load_categories_from_metadata)
 
 
 # Pydantic models
@@ -146,10 +115,10 @@ async def load_model():
     """Load TensorFlow model at server startup to avoid cold start latency"""
     global model
 
-    model_path = os.getenv("MODEL_PATH", "/app/models/quickdraw_v1.0.0.h5")
+    model_path = os.getenv("MODEL_PATH", f"/app/models/quickdraw_{MODEL_VERSION}.h5")
     # Fallback to local path for development
     if not os.path.exists(model_path):
-        model_path = "./models/quickdraw_v1.0.0.h5"
+        model_path = f"./models/quickdraw_{MODEL_VERSION}.h5"
 
     try:
         if os.path.exists(model_path):
@@ -314,6 +283,19 @@ async def health_check():
         model_loaded=model is not None,
         categories_count=len(CATEGORIES),
     )
+
+
+@app.get("/categories")
+async def get_categories():
+    """
+    Get all available drawing categories
+    Categories are loaded from model metadata at startup
+    """
+    return {
+        "categories": CATEGORIES,
+        "count": len(CATEGORIES),
+        "model_version": MODEL_VERSION,
+    }
 
 
 @app.post("/predict", response_model=PredictionResponse)

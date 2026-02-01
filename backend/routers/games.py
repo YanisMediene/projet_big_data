@@ -11,6 +11,9 @@ from services.firestore_service import FirestoreService
 from firebase_admin import firestore
 import random
 
+# Import categories from config module (loaded dynamically from model metadata)
+from config import CATEGORIES
+
 router = APIRouter(prefix="/games", tags=["multiplayer"])
 firestore_service = FirestoreService()
 
@@ -90,22 +93,7 @@ async def create_race_game(request: CreateGameRequest):
         "max_rounds": 5,
         "round_duration": 60,  # seconds
         "target_confidence": 0.85,
-        "categories": [
-            "apple",
-            "sun",
-            "tree",
-            "house",
-            "car",
-            "cat",
-            "fish",
-            "star",
-            "umbrella",
-            "flower",
-            "moon",
-            "airplane",
-            "bicycle",
-            "clock",
-        ],
+        "categories": CATEGORIES,  # Use all 345 categories from model metadata
     }
 
     settings = {**default_settings, **(request.settings or {})}
@@ -574,22 +562,7 @@ async def create_guessing_game(request: CreateGameRequest):
         "round_duration": 90,  # seconds
         "ai_confidence_threshold": 0.85,
         "prediction_interval": 500,  # ms
-        "categories": [
-            "apple",
-            "sun",
-            "tree",
-            "house",
-            "car",
-            "cat",
-            "fish",
-            "star",
-            "umbrella",
-            "flower",
-            "moon",
-            "airplane",
-            "bicycle",
-            "clock",
-        ],
+        "categories": CATEGORIES,  # Use all 345 categories from model metadata
     }
 
     settings = {**default_settings, **(request.settings or {})}

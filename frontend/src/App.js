@@ -13,17 +13,9 @@ import Settings from './components/Settings/Settings';
 import NewFrontTest from './NewFrontTest';
 import TestCanva from './TestCanva';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { predictDrawing, checkHealth } from './services/api';
+import { predictDrawing, checkHealth, getCategories } from './services/api';
 import { useSettings } from './hooks/useSettings';
 import './App.css';
-
-// 20 Quick Draw categories
-const CATEGORIES = [
-  'apple', 'sun', 'tree', 'house', 'car',
-  'cat', 'fish', 'star', 'umbrella', 'flower',
-  'moon', 'airplane', 'bicycle', 'clock', 'eye',
-  'cup', 'shoe', 'cloud', 'lightning', 'smiley_face'
-];
 
 // Home Page Component (Drawing Interface)
 function HomePage() {
@@ -35,19 +27,27 @@ function HomePage() {
   const [canvasImage, setCanvasImage] = useState(null);
   const [showCorrectionModal, setShowCorrectionModal] = useState(false);
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [categories, setCategories] = useState([]);
 
-  // Check backend health on mount
+  // Check backend health and load categories on mount
   useEffect(() => {
-    const checkBackendHealth = async () => {
+    const initBackend = async () => {
       try {
         const health = await checkHealth();
         setBackendStatus(health.status === 'healthy' ? 'online' : 'offline');
+        
+        // Load categories from backend
+        const categoriesData = await getCategories();
+        if (categoriesData.categories && categoriesData.categories.length > 0) {
+          setCategories(categoriesData.categories);
+          console.log(`✅ Loaded ${categoriesData.count} categories from backend`);
+        }
       } catch (error) {
         setBackendStatus('offline');
       }
     };
 
-    checkBackendHealth();
+    initBackend();
   }, []);
 
   const handleDrawingChange = async (base64Image) => {
@@ -158,9 +158,9 @@ function HomePage() {
           </ol>
           
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Available Categories ({CATEGORIES.length})</h3>
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2">
-              {CATEGORIES.map((category) => (
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Available Categories ({categories.length})</h3>
+            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2 max-h-64 overflow-y-auto">
+              {categories.map((category) => (
                 <span
                   key={category}
                   className="px-2 py-1 bg-primary-100 text-primary-800 text-xs font-medium rounded text-center capitalize"
@@ -179,7 +179,7 @@ function HomePage() {
         onClose={() => setShowCorrectionModal(false)}
         predictions={predictions}
         canvasImage={canvasImage}
-        categories={CATEGORIES}
+        categories={categories}
       />
     </div>
   );

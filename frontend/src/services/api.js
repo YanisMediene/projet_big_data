@@ -60,4 +60,18 @@ export const checkHealth = async () => {
   }
 };
 
+/**
+ * Get available categories from backend
+ * Categories are loaded from model metadata (345 Quick Draw classes)
+ */
+export const getCategories = async () => {
+  try {
+    const response = await apiClient.get('/categories');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch categories:', error);
+    return { categories: [], count: 0 };
+  }
+};
+
 export default apiClient;

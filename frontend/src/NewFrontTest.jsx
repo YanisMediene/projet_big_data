@@ -1,46 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send } from 'lucide-react';
-import { predictDrawing } from './services/api';
+import { predictDrawing, getCategories } from './services/api';
+import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
 
-// --- DATA & CONSTANTS ---
-// Mapping des catégories anglaises du backend vers français
-const CATEGORY_MAP = {
-  'apple': 'une pomme',
-  'sun': 'un soleil',
-  'tree': 'un arbre',
-  'house': 'une maison',
-  'car': 'une voiture',
-  'cat': 'un chat',
-  'fish': 'un poisson',
-  'star': 'une étoile',
-  'umbrella': 'un parapluie',
-  'flower': 'une fleur',
-  'moon': 'une lune',
-  'airplane': 'un avion',
-  'bicycle': 'un vélo',
-  'clock': 'une horloge',
-  'eye': 'un œil',
-  'cup': 'une tasse',
-  'shoe': 'une chaussure',
-  'cloud': 'un nuage',
-  'lightning': 'un éclair',
-  'smiley_face': 'un visage'
-};
-
-// Reverse mapping: français -> anglais
-const FRENCH_TO_ENGLISH = Object.fromEntries(
-  Object.entries(CATEGORY_MAP).map(([en, fr]) => [fr, en])
-);
-
-// Liste des mots disponibles (en français)
-const WORDS_TO_DRAW = Object.values(CATEGORY_MAP);
-
-// Constantes pour les modes de jeu
+// --- CONSTANTES GLOBALES ---
 const TOTAL_ROUNDS_CLASSIC = 6;
-const TOTAL_ROUNDS_RACE = 6; // Mode Course : 6 manches
+const TOTAL_ROUNDS_RACE = 6;
 const ROUND_TIME = 20;
 
-// Mock Data pour les modes multijoueurs
 const WRONG_GUESSES = [
   "un truc", "aucune idée", "c'est quoi ça ?", "un ovni", 
   "bizarre...", "un chien ?", "une table ?", "abstrait"
@@ -53,10 +20,10 @@ const MOCK_LOBBIES = [
 ];
 
 const INITIAL_MOCK_PLAYERS = [
-  { id: 'me', name: "Moi", isHost: true, avatar: "😎", score: 0 },
-  { id: 2, name: "Thomas", isHost: false, avatar: "😺", score: 0 },
-  { id: 3, name: "Sarah", isHost: false, avatar: "🎨", score: 0 },
-  { id: 4, name: "Robot_X", isHost: false, avatar: "🤖", score: 0 },
+  { id: 1, name: "Toi", score: 0 },
+  { id: 2, name: "Bot1", score: 0 },
+  { id: 3, name: "Bot2", score: 0 },
+  { id: 4, name: "Bot3", score: 0 },
 ];
 
 // --- MAIN COMPONENT ---
@@ -67,10 +34,42 @@ export default function QuickDrawApp() {
   const [currentWord, setCurrentWord] = useState('');
   const [previousWord, setPreviousWord] = useState(''); // Pour éviter les répétitions
   const [drawings, setDrawings] = useState([]); 
-  const [players, setPlayers] = useState(INITIAL_MOCK_PLAYERS);
+  const [players, setPlayers] = useState([
+    { id: 'me', name: "Moi", isHost: true, avatar: "😎", score: 0 },
+    { id: 2, name: "Thomas", isHost: false, avatar: "😺", score: 0 },
+    { id: 3, name: "Sarah", isHost: false, avatar: "🎨", score: 0 },
+    { id: 4, name: "Robot_X", isHost: false, avatar: "🤖", score: 0 },
+  ]);
+  
+  // Liste des mots disponibles - chargée depuis l'API
+  const [wordsToDrawFr, setWordsToDrawFr] = useState([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   
   // Controls the "Curtain" transition overlay during the game
   const [showOverlay, setShowOverlay] = useState(false);
+
+  // Charger les catégories depuis l'API au démarrage
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const data = await getCategories();
+        if (data.categories && data.categories.length > 0) {
+          // Convertir les catégories anglaises en français
+          const wordsFr = data.categories.map(cat => CATEGORY_MAP[cat] || cat);
+          setWordsToDrawFr(wordsFr);
+          setCategoriesLoaded(true);
+          console.log(`✅ Loaded ${data.count} categories from backend`);
+        }
+      } catch (error) {
+        console.error('Failed to load categories:', error);
+        // Fallback: utiliser toutes les catégories du fichier
+        setWordsToDrawFr(Object.values(CATEGORY_MAP));
+        setCategoriesLoaded(true);
+      }
+    };
+    
+    loadCategories();
+  }, []);
 
   // Start sequence: Welcome -> Mode Select
   const goToModeSelect = () => {
@@ -105,11 +104,17 @@ export default function QuickDrawApp() {
   };
 
   const prepareRound = (roundNum) => {
+    // Ne pas démarrer si les catégories ne sont pas chargées
+    if (!categoriesLoaded || wordsToDrawFr.length === 0) {
+      console.warn('Categories not loaded yet');
+      return;
+    }
+    
     // Choisir un mot différent du précédent
     let word;
     do {
-      word = WORDS_TO_DRAW[Math.floor(Math.random() * WORDS_TO_DRAW.length)];
-    } while (word === previousWord && WORDS_TO_DRAW.length > 1);
+      word = wordsToDrawFr[Math.floor(Math.random() * wordsToDrawFr.length)];
+    } while (word === previousWord && wordsToDrawFr.length > 1);
     
     setCurrentWord(word);
     setPreviousWord(word);

@@ -40,7 +40,9 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 | **Cloud** | Firebase + Cloud Run | 10.8.0 / europe-west1 | Seamless integration, cost-effective |
 | **Dataset** | Google Quick Draw | 1.4M images (20 categories) | High-quality labeled data |
 
-### Key Performance Metrics (v1.0.0)
+### Key Performance Metrics
+
+**Model v1.0.0 (20 classes) :**
 
 | Metric | Value | Target | Status |
 |--------|-------|--------|--------|
@@ -50,6 +52,32 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 | **Model Size** | 140 KB | <500KB | ✅ Met |
 | **Monthly Cost (100 DAU)** | <$1 | <$10 | ✅ Exceeded |
 | **Cold Start Time** | 2-5s | <10s | ✅ Met |
+
+**Model v3.0.0 (345 classes) :**
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Model Accuracy** | 73.2% | Trade-off attendu avec plus de classes |
+| **Inference Latency** | ~15-20ms | Légèrement plus lent (plus de classes) |
+| **Model Size** | 30.1 MB | Modèle plus volumineux |
+| **Cold Start Time** | 5-10s | Chargement plus long |
+| **Categories** | 345 | Toutes les catégories Quick Draw |
+
+### Switching Model Versions
+
+Le système supporte plusieurs versions de modèle via la variable `MODEL_VERSION` :
+
+**Configuration :**
+- Développement : `backend/.env` → `MODEL_VERSION=v3.0.0`
+- Production : `backend/env.yaml` → `MODEL_VERSION: "v3.0.0"`
+
+**Chargement automatique :**
+- Modèle : `models/quickdraw_{MODEL_VERSION}.h5`
+- Métadonnées : `models/quickdraw_{MODEL_VERSION}_metadata.json`
+
+**Versions disponibles :**
+- `v1.0.0` : 20 classes, 140 KB, 91-93% accuracy
+- `v3.0.0` : 345 classes, 30.1 MB, 73% accuracy
 
 ### Production URLs
 

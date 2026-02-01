@@ -74,6 +74,58 @@ MODEL_VERSION=v1.0.0
 MODEL_PATH=./models/quickdraw_v1.0.0.h5
 ```
 
+### 🔄 Switcher entre les Versions du Modèle
+
+**Le système charge automatiquement le modèle et les catégories** basé sur `MODEL_VERSION`.
+
+#### Développement Local
+
+**Fichier :** `backend/.env`
+
+```bash
+# Pour utiliser le modèle 20 classes (v1.0.0)
+MODEL_VERSION=v1.0.0
+
+# Pour utiliser le modèle 345 classes (v3.0.0)
+MODEL_VERSION=v3.0.0
+```
+
+#### Production (Cloud Run)
+
+**Fichier :** `backend/env.yaml`
+
+```yaml
+# Pour utiliser le modèle 20 classes
+MODEL_VERSION: "v1.0.0"
+
+# Pour utiliser le modèle 345 classes
+MODEL_VERSION: "v3.0.0"
+```
+
+#### Ce qui est chargé automatiquement
+
+Le système charge :
+- **Modèle :** `./models/quickdraw_{MODEL_VERSION}.h5`
+- **Catégories :** `./models/quickdraw_{MODEL_VERSION}_metadata.json`
+
+**Exemple :**
+- `MODEL_VERSION=v1.0.0` → 20 classes (apple, sun, tree, ...)
+- `MODEL_VERSION=v3.0.0` → 345 classes (aircraft carrier, airplane, ...)
+
+**Après modification :** 
+
+1. **Redémarrer le serveur backend**
+   ```bash
+   cd backend
+   uvicorn main:app --reload --port 8000
+   ```
+
+2. **Rafraîchir le frontend (hard refresh)**
+   - **Mac :** `Cmd + Shift + R`
+   - **Windows/Linux :** `Ctrl + Shift + R`
+   
+   ⚠️ Le navigateur cache les catégories. Un simple F5 ne suffit pas !
+
 ---
 
 ## Environnement de Développement
