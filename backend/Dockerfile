@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le code de l'application
 COPY main.py .
+COPY config.py .
 COPY models/ ./models/
 COPY middleware/ ./middleware/
 COPY routers/ ./routers/
