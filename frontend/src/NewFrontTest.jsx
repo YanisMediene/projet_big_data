@@ -451,6 +451,55 @@ export default function QuickDrawApp() {
 // --- SUB-COMPONENTS ---
 
 function WelcomeScreen({ onStart }) {
+  const [backendStatus, setBackendStatus] = useState('checking'); // 'checking', 'up', 'down'
+
+  useEffect(() => {
+    // Check backend health on mount
+    const checkBackendHealth = async () => {
+      setBackendStatus('checking');
+      try {
+        const response = await fetch('http://localhost:8000/health', { 
+          method: 'GET',
+          signal: AbortSignal.timeout(3000) // 3 second timeout
+        });
+        
+        if (response.ok) {
+          setBackendStatus('up');
+        } else {
+          setBackendStatus('down');
+        }
+      } catch (error) {
+        console.error('Backend health check failed:', error);
+        setBackendStatus('down');
+      }
+    };
+
+    checkBackendHealth();
+    
+    // Re-check every 30 seconds
+    const interval = setInterval(checkBackendHealth, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const getStatusColor = () => {
+    switch (backendStatus) {
+      case 'up': return 'bg-green-500';
+      case 'down': return 'bg-red-500';
+      case 'checking': return 'bg-yellow-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
+  const getStatusText = () => {
+    switch (backendStatus) {
+      case 'up': return 'Backend connecté';
+      case 'down': return 'Backend déconnecté';
+      case 'checking': return 'Vérification...';
+      default: return 'Inconnu';
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center z-10 relative">
       <div className="mb-8 relative">
@@ -473,8 +522,17 @@ function WelcomeScreen({ onStart }) {
         C'est parti !
       </button>
 
-      <div className="mt-20 text-gray-500 text-sm flex gap-4">
+      <div className="mt-20 text-gray-500 text-sm flex items-center gap-4">
         <span>À propos</span>
+        <span>•</span>
+        {/* Backend Status LED */}
+        <div className="flex items-center gap-2 group relative">
+          <div className={`w-3 h-3 rounded-full ${getStatusColor()} ${backendStatus === 'checking' ? 'animate-pulse' : ''} shadow-lg`}></div>
+          {/* Tooltip on hover */}
+          <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none">
+            {getStatusText()}
+          </div>
+        </div>
         <span>•</span>
         <span>Confidentialité</span>
       </div>
