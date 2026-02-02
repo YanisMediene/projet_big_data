@@ -1,18 +1,17 @@
 # 🚀 Getting Started - AI Pictionary
 
-Guide complet pour démarrer avec AI Pictionary : de l'accès instantané en production au développement local avancé.
+Guide complet pour démarrer avec AI Pictionary : de l'accès en production au développement local.
 
 ---
 
 ## 📋 Table des Matières
 
-1. [Option 1 : Production (0 min)](#option-1-production-0-min)
-2. [Option 2 : Développement Local (70 min)](#option-2-développement-local-70-min)
-3. [Option 3 : Quick Setup Phase 2 (15 min)](#option-3-quick-setup-phase-2-15-min)
-4. [Workflow Quotidien](#workflow-quotidien)
-5. [Architecture](#architecture)
-6. [Tests & Vérification](#tests--vérification)
-7. [Dépannage](#dépannage)
+1. [Option 1 : Production](#option-1--production-0-min)
+2. [Option 2 : Développement Local](#option-2--développement-local)
+3. [Workflow Quotidien](#workflow-quotidien)
+4. [Architecture](#architecture)
+5. [Tests & Vérification](#tests--vérification)
+6. [Dépannage](#dépannage)
 
 ---
 
@@ -24,76 +23,63 @@ Guide complet pour démarrer avec AI Pictionary : de l'accès instantané en pro
 
 **Caractéristiques :**
 - ✅ Aucune installation nécessaire
-- ✅ Backend déployé sur Google Cloud Run (europe-west1)
-- ✅ Frontend hébergé sur Firebase Hosting (CDN global)
-- ✅ Modèle CNN pré-entraîné (91-93% accuracy)
-- ✅ 20 catégories disponibles
-- ✅ Gratuit (dans les limites du free tier)
+- ✅ Backend sur Google Cloud Run (europe-west1)
+- ✅ Frontend sur Firebase Hosting (CDN global)
+- ✅ Modèle CNN v4.0.0 (50 classes, 90.2% accuracy)
+- ✅ 3 modes de jeu (Classic, Race, Team vs IA)
+- ✅ Gratuit (free tier)
 
 ### 📊 URLs & Statuts
 
-| Service | URL | Statut |
-|---------|-----|--------|
-| **Frontend** | https://ai-pictionary-4f8f2.web.app | ✅ Live |
-| **Backend API** | https://ai-pictionary-backend-1064461234232.europe-west1.run.app | ✅ Live |
-| **Health Check** | [/health](https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health) | ✅ Healthy |
-| **API Docs** | [/docs](https://ai-pictionary-backend-1064461234232.europe-west1.run.app/docs) | 📚 Available |
+| Service | URL |
+|---------|-----|
+| **Frontend** | https://ai-pictionary-4f8f2.web.app |
+| **Backend API** | https://ai-pictionary-backend-1064461234232.europe-west1.run.app |
+| **API Docs** | /docs |
 
 ### 🧪 Test Rapide
 
 ```bash
-# Vérifier la santé du backend
 curl https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health
+```
 
-# Réponse attendue :
+**Réponse attendue :**
+```json
 {
   "status": "healthy",
-  "model_version": "v1.0.0",
+  "model_version": "v4.0.0",
   "model_loaded": true,
-  "categories_count": 20
+  "categories_count": 50
 }
 ```
 
 ### 📈 Performances Production
 
-| Métrique | Valeur | Note |
-|----------|--------|------|
-| **Latence frontend** | <2s | Chargement initial |
-| **Latence backend (warm)** | 113-327ms | Réponse API |
-| **Cold start** | 2-5s | Après 15min d'inactivité |
-| **Inférence CNN** | 8-12ms | Temps réel |
-| **Coût** | $0/mois | 100 utilisateurs (free tier) |
-| **Taille bundle** | 80KB | Gzipped |
+| Métrique | Valeur |
+|----------|--------|
+| Latence backend (warm) | 120-350ms |
+| Cold start | 5-8s |
+| Inférence CNN | 12-18ms |
+| Coût | ~$0/mois (100 DAU) |
 
 ---
 
-## Option 2 : Développement Local (70 min)
+## Option 2 : Développement Local
 
 ### 🎯 Quand utiliser le développement local ?
 
-- ✅ Modifier le code frontend/backend
-- ✅ Entraîner un nouveau modèle
-- ✅ Tester des changements avant déploiement
-- ✅ Développer de nouvelles fonctionnalités
-- ✅ Debugger l'application
+- Modifier le code frontend/backend
+- Entraîner un nouveau modèle
+- Tester des changements avant déploiement
+- Debugger l'application
 
 ### Prérequis
 
 - Python 3.8+
 - Node.js 16+
 - ~4GB d'espace disque
-- Connexion internet
 
-### 📦 Étape 1 : Télécharger le Dataset (20-30 min)
-
-```bash
-cd ml-training
-python scripts/download_dataset.py
-```
-
-**💡 Astuce :** Le téléchargement s'exécute en arrière-plan. Passez aux étapes suivantes pendant ce temps.
-
-### 📥 Étape 2 : Installer les Dépendances (5 min)
+### 📥 Étape 1 : Installer les Dépendances (5 min)
 
 **Backend :**
 ```bash
@@ -107,36 +93,33 @@ cd frontend
 npm install
 ```
 
-### ⚙️ Étape 3 : Prétraiter le Dataset (10 min)
+### ⚙️ Étape 2 : Configurer l'Environnement
 
+**Backend (.env) :**
 ```bash
-cd ml-training
-python scripts/preprocess_dataset.py
+cd backend
+cp .env.example .env
+
+# Générer clé admin
+openssl rand -hex 32
+# Ajouter dans .env : ADMIN_API_KEY=<clé>
 ```
 
-**Résultat attendu :** Fichier `data/quickdraw_20cat.h5` (~400MB)
-
-### 🧠 Étape 4 : Entraîner le Modèle (30 min)
-
+**Frontend (.env.local) :**
 ```bash
-cd ml-training
-jupyter notebook notebooks/train_model.ipynb
+# Créer frontend/.env.local avec :
+REACT_APP_FIREBASE_API_KEY=...
+REACT_APP_FIREBASE_PROJECT_ID=ai-pictionary-4f8f2
+REACT_APP_FIREBASE_DATABASE_URL=https://ai-pictionary-4f8f2-default-rtdb.firebaseio.com
+REACT_APP_API_BASE_URL=http://localhost:8000
 ```
 
-**Instructions :**
-1. Ouvrir le notebook dans le navigateur
-2. Menu → "Cell" → "Run All"
-3. Attendre la fin de l'entraînement (15 epochs)
-4. Le modèle sera sauvegardé dans `backend/models/quickdraw_v1.0.0.h5`
-
-**💡 Note :** Par défaut, le système utilise le modèle v4.0.0 (50 classes, 90.2% accuracy). Pour utiliser le modèle v1.0.0 (20 classes) ou v3.0.0 (345 classes) déjà entraîné, modifiez `MODEL_VERSION=v1.0.0` ou `MODEL_VERSION=v3.0.0` dans `backend/.env`
-
-### 🚀 Étape 5 : Lancer l'Application (2 min)
+### 🚀 Étape 3 : Lancer l'Application
 
 **Terminal 1 - Backend :**
 ```bash
 cd backend
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8000
 ```
 
 **Terminal 2 - Frontend :**
@@ -145,140 +128,43 @@ cd frontend
 npm start
 ```
 
-### ✅ Étape 6 : Tester
+### ✅ Étape 4 : Tester
 
 1. Ouvrir http://localhost:3000
-2. Dessiner sur le canvas
-3. Voir les prédictions en temps réel !
-
-### ⏱️ Temps Estimé Total
-
-| Étape | Durée | Parallélisable |
-|-------|-------|----------------|
-| Téléchargement dataset | 20-30 min | ✅ (pendant installation) |
-| Installation dépendances | 5 min | ✅ |
-| Prétraitement dataset | 10 min | ❌ |
-| Entraînement modèle | 30 min | ❌ |
-| Test application | 5 min | ❌ |
-| **TOTAL** | **~70 min** | |
+2. Choisir un mode de jeu
+3. Dessiner sur le canvas
+4. Voir les prédictions en temps réel !
 
 ---
 
-## Option 3 : Quick Setup Phase 2 (15 min)
+## (Optionnel) Entraîner un Nouveau Modèle
 
-### 🎯 Objectif
-Activer toutes les nouvelles fonctionnalités (Settings, Multiplayer, Routing) en **15 minutes**.
-
-### 🚀 Option A : Script Automatique (RECOMMANDÉ)
+### 📦 Télécharger le Dataset (20-30 min)
 
 ```bash
-cd /Users/mediene/Informatique/SEM9/projet_big_data
-./setup_phase2.sh
+cd ml-training
+python scripts/download_dataset.py
 ```
 
-**Ce script fait automatiquement :**
-- ✅ Crée `backend/.env` avec ADMIN_API_KEY sécurisée
-- ✅ Installe `react-router-dom`
-- ✅ Remplace `App.js` par la version avec routing
-- ✅ Vérifie tous les composants
-
-**Après le script :**
-```bash
-# Terminal 1 : Backend
-cd backend
-python -m uvicorn main:app --reload
-
-# Terminal 2 : Frontend
-cd frontend
-npm start
-```
-
-**Tester :**
-- 🎨 Dessin : http://localhost:3000/
-- 🎮 Multiplayer : http://localhost:3000/multiplayer
-- ⚙️ Settings : http://localhost:3000/settings
-
-### 🛠️ Option B : Manuel (si script échoue)
-
-#### 1. Backend Setup (5 min)
+### ⚙️ Prétraiter le Dataset (10 min)
 
 ```bash
-cd backend
-
-# Copier .env
-cp .env.example .env
-
-# Générer clé admin
-openssl rand -hex 32
-# Copier le résultat
-
-# Éditer .env
-nano .env
-# Remplacer : ADMIN_API_KEY=<coller_la_clé>
-# Sauvegarder : Ctrl+O, Enter, Ctrl+X
+cd ml-training
+python scripts/preprocess_dataset.py
 ```
 
-#### 2. Frontend Setup (10 min)
+**Résultat :** `data/quickdraw_20cat.h5` (~400MB)
+
+### 🧠 Entraîner le Modèle (30 min)
 
 ```bash
-cd frontend
-
-# Installer React Router
-npm install react-router-dom
-
-# Backup ancien App.js
-cp src/App.js src/App.js.backup
-
-# Remplacer par nouveau App.js
-cp src/App.ROUTER.js src/App.js
+cd ml-training
+jupyter notebook notebooks/train_model.ipynb
 ```
-
-#### 3. Démarrer (2 min)
-
-```bash
-# Terminal 1
-cd backend
-python -m uvicorn main:app --reload
-
-# Terminal 2
-cd frontend
-npm start
-```
-
-### ✅ Checklist de Vérification Phase 2
-
-**Backend :**
-- [ ] `backend/.env` existe
-- [ ] `ADMIN_API_KEY` configurée (32+ caractères)
-- [ ] `backend/serviceAccountKey.json` existe
-- [ ] Backend démarre sans erreur sur port 8000
-
-**Frontend :**
-- [ ] `react-router-dom` installé
-- [ ] `App.js` contient `<Router>`, `<Routes>`, `<Route>`
-- [ ] Frontend démarre sans erreur sur port 3000
-- [ ] Navigation fonctionne entre pages
-
-**Firebase Realtime Database (pour Team vs IA) :**
-- [ ] `REACT_APP_FIREBASE_DATABASE_URL` configuré dans `.env`
-- [ ] Règles RTDB déployées (`firebase deploy --only database`)
-- [ ] Émulateur RTDB démarré si dev local (`REACT_APP_USE_RTDB_EMULATOR=true`)
-
-**Tests Rapides :**
-- [ ] Page principale (/) affiche le canvas
-- [ ] Page multiplayer (/multiplayer) accessible
-- [ ] Page settings (/settings) affiche les options
-- [ ] Prédictions temps réel fonctionnent
-- [ ] Modal de correction apparaît (<85% confiance)
-- [ ] Mode Team vs IA : viewers voient le dessin en temps réel
 
 ---
 
 ## Workflow Quotidien
-
-### 📋 Workflow Simple (sans confusion)
-
-**Vous n'avez PAS besoin de switcher manuellement les `.env` !** Les scripts gèrent tout automatiquement.
 
 ### 🌅 Matin : Développement
 
@@ -286,80 +172,20 @@ npm start
 git pull origin main
 cd frontend
 npm start
-# 🎨 Codez tranquillement...
 ```
 
-### 🌆 Après-midi : Tests & Commits
-
-```bash
-git add .
-git commit -m "feat: nouvelle fonctionnalité"
-git push origin main
-```
-
-### 🌃 Soir : Déploiement (si feature terminée)
+### 🌃 Soir : Déploiement
 
 ```bash
 ./deploy.sh frontend    # Juste le frontend
-# OU
+./deploy.sh backend     # Juste le backend
 ./deploy.sh all         # Tout déployer
 ```
 
-### 🔄 Ce Qui Se Passe Automatiquement
-
-Quand vous faites `./deploy.sh frontend` :
-
-1. ✅ **Sauvegarde** `.env.local` → `.env.local.bak`
-2. ✅ **Build** avec `.env.production` (URLs de prod)
-3. ✅ **Deploy** sur Firebase Hosting
-4. ✅ **Restaure** `.env.local.bak` → `.env.local`
-
-**Résultat :** Votre environnement local reste intact ! 🎉
-
-### 📁 Fichiers à Gérer
-
-| Fichier | Git | Usage | Contenu |
-|---------|-----|-------|---------|
-| `.env.production` | ✅ Commiter | Build prod | URLs Cloud Run + Firebase |
-| `.env.local` | ❌ Ignorer | Dev local | Émulateurs + localhost |
-| `.env.local.bak` | ❌ Ignorer | Temporaire | Auto-généré par script |
-
-### 🎓 Conseils Pro
-
-#### ✅ À Faire Tous Les Jours
-
-```bash
-# Matin
-git pull
-
-# Développement
-npm start  # Utilise .env.local automatiquement
-
-# Fin de journée (si nécessaire)
-./deploy.sh frontend  # Gère .env automatiquement
-```
-
-#### ✅ Avant un Deploy
-
-```bash
-# 1. Tester localement
-npm start
-
-# 2. Vérifier que tout marche
-# (navigation, features, etc.)
-
-# 3. Déployer
-./deploy.sh frontend
-```
-
-#### ❌ Ne JAMAIS Faire
-
-```bash
-# ❌ Éditer .env.local avant build
-# ❌ Commiter .env.local
-# ❌ Mettre des URLs de prod dans .env.local
-# ❌ Copier manuellement .env.production vers .env
-```
+Le script gère automatiquement :
+- Sauvegarde `.env.local` → `.env.local.bak`
+- Build avec `.env.production`
+- Restaure `.env.local`
 
 ---
 
@@ -373,68 +199,43 @@ npm start
               ▼
 ┌───────────────────────────────┐
 │  Firebase Hosting (CDN)       │
-│  ai-pictionary-4f8f2.web.app  │
-│  React SPA (80KB gzipped)     │
+│  React SPA                    │
 └──────────────┬────────────────┘
-               │ HTTPS
+               │
                ▼
 ┌───────────────────────────────┐
 │  Google Cloud Run             │
-│  (europe-west1)               │
 │  FastAPI + TensorFlow         │
-│  Docker (500MB image)         │
-│  Scale: 0-10 instances        │
+│  (europe-west1)               │
 └──────────────┬────────────────┘
                │
                ▼
 ┌───────────────────────────────┐
 │  Firebase Services            │
-│  - Auth (Google, Email)       │
-│  - Firestore (NoSQL)          │
-│  - Storage (Objects)          │
+│  - Firestore (games, scores)  │
+│  - RTDB (multiplayer sync)    │
+│  - Storage (models)           │
 └───────────────────────────────┘
 ```
 
-### 💻 Architecture Développement Local
+### 🎮 Modes de Jeu
+
+| Mode | Description | Joueurs |
+|------|-------------|---------|
+| **Classic** | Solo contre l'IA | 1 |
+| **Race** | Course - premier à faire deviner | 2-8 |
+| **Team vs IA** | Équipe vs IA qui devine | 2-8 |
+
+### 🎓 Catégories (50)
 
 ```
-┌─────────────┐      HTTP/REST       ┌─────────────┐
-│   React     │ ←─────────────────────→  │  FastAPI    │
-│   Frontend  │   POST /predict      │  Backend    │
-│  (Port 3000)│                      │ (Port 8000) │
-└─────────────┘                      └─────────────┘
-      │                                     │
-      │                                     │
-      ▼                                     ▼
-  Canvas 280x280                    TensorFlow Model
-  Debounce 500ms                    quickdraw_v1.0.0.h5
-                                    (50K params, 5ms)
-                                    
-  Firebase SDK ─────────────────────────────────→ Production Firebase
-  (connects to cloud)                           (Auth, Firestore, Storage)
-```
-
-### 🎯 Workflow Utilisateur
-
-1. **Dessiner** sur canvas (280x280px)
-2. **Attendre 500ms** (debounce automatique)
-3. **API appelle** `/predict` avec image base64
-4. **Backend** :
-   - Prétraite l'image (centroid crop, normalize)
-   - Exécute le modèle CNN
-   - Retourne top-3 prédictions
-5. **Frontend affiche** :
-   - 🟢 Vert si confiance >85%
-   - 🟡 Jaune si 70-85%
-   - 🔴 Rouge si <70% → Modal de correction
-
-### 🎓 Catégories Disponibles (20)
-
-```
-apple, sun, tree, house, car,
-cat, fish, star, umbrella, flower,
-moon, airplane, bicycle, clock, eye,
-cup, shoe, cloud, lightning, smiley_face
+airplane, apple, axe, banana, baseball bat, basketball,
+bear, bed, bench, bicycle, bird, book, bread, bridge,
+broccoli, bus, butterfly, cake, camera, candle, car,
+cat, chair, clock, cloud, coffee cup, dog, door, donut,
+envelope, eye, fish, flower, fork, grapes, hamburger,
+hot dog, house, ice cream, key, laptop, leaf, moon, mountain,
+pizza, rainbow, star, strawberry, tree, umbrella
 ```
 
 ---
@@ -444,67 +245,38 @@ cup, shoe, cloud, lightning, smiley_face
 ### 🧪 Test Production
 
 ```bash
-# Backend health check
+# Health check
 curl https://ai-pictionary-backend-1064461234232.europe-west1.run.app/health
 
-# Résultat attendu :
-{
-  "status": "healthy",
-  "model_version": "v1.0.0",
-  "model_loaded": true,
-  "categories_count": 20
-}
-
-# Frontend (ouvrir dans le navigateur)
-open https://ai-pictionary-4f8f2.web.app
+# Catégories
+curl https://ai-pictionary-backend-1064461234232.europe-west1.run.app/categories
 ```
 
 ### 🧪 Test Local
 
 ```bash
-# Backend
+# Health check
 curl http://localhost:8000/health
 
-# Frontend
-open http://localhost:3000
+# Prédiction
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"image": "data:image/png;base64,..."}'
 ```
 
-### 🧪 Test d'Intégration Complet
+### ✅ Checklist de Vérification
 
-```bash
-python test_integration.py
-```
+**Backend :**
+- [ ] `backend/.env` existe
+- [ ] `ADMIN_API_KEY` configurée
+- [ ] `backend/serviceAccountKey.json` existe
+- [ ] Backend démarre sur port 8000
 
-**Résultat attendu :**
-```
-✅ PASSED  Dataset
-✅ PASSED  Model
-✅ PASSED  Backend Health (localhost:8000)
-✅ PASSED  Frontend (localhost:3000)
-✅ PASSED  Prediction
-
-🎉 All systems operational!
-```
-
-### ✅ Checklist Avant Défense
-
-**Production (Recommandé) :**
-- [ ] Application production accessible
-- [ ] Backend health check OK
-- [ ] Prédictions en temps réel fonctionnelles
-- [ ] Modal de correction apparaît (<85% confiance)
-- [ ] Documentation défense lue ([TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md))
-- [ ] Architecture Cloud Run + Firebase comprise
-- [ ] Coûts production documentés ($0/mois pour 100 DAU)
-
-**Développement Local (Optionnel) :**
-- [ ] Dataset téléchargé (20 catégories)
-- [ ] Dataset prétraité (quickdraw_20cat.h5)
-- [ ] Modèle entraîné (quickdraw_v1.0.0.h5)
-- [ ] Backend fonctionne (localhost:8000)
-- [ ] Frontend fonctionne (localhost:3000)
-- [ ] Prédictions testées
-- [ ] Modal de correction testé
+**Frontend :**
+- [ ] Frontend démarre sur port 3000
+- [ ] Canvas dessin fonctionne
+- [ ] Prédictions temps réel
+- [ ] Modes multiplayer accessibles
 
 ---
 
@@ -512,98 +284,37 @@ python test_integration.py
 
 ### 🐛 Problèmes Courants
 
-#### Backend : "Model not loaded"
-
-```bash
-# Vérifier que le modèle existe
-ls -lh backend/models/quickdraw_v1.0.0.h5
-
-# Si absent, entraîner le modèle
-cd ml-training
-jupyter notebook notebooks/train_model.ipynb
-```
-
-#### Frontend : "Backend offline"
-
-```bash
-# Démarrer le backend
-cd backend
-uvicorn main:app --reload
-
-# Vérifier le health check
-curl http://localhost:8000/health
-```
-
-#### Dataset : Téléchargement lent
-
-```bash
-# Vérifier la progression
-cd ml-training/data/raw
-ls -lh *.npy | wc -l  # Devrait afficher 20
-```
-
 #### Port déjà utilisé
 
 ```bash
-# Backend (port 8000)
-lsof -ti:8000 | xargs kill -9
-
-# Frontend (port 3000)
-lsof -ti:3000 | xargs kill -9
+lsof -ti:8000 | xargs kill -9  # Backend
+lsof -ti:3000 | xargs kill -9  # Frontend
 ```
 
-#### Phase 2 : React Router non installé
+#### CORS errors
 
+Vérifier `backend/env.yaml` :
+```yaml
+CORS_ORIGINS: "https://ai-pictionary-4f8f2.web.app,http://localhost:3000"
+```
+
+#### Modèle ne charge pas
+
+Vérifier que les fichiers existent :
 ```bash
-cd frontend
-npm install react-router-dom
+ls backend/models/
+# Doit contenir : quickdraw_v4.0.0.h5, quickdraw_v4.0.0_metadata.json
 ```
 
-#### Phase 2 : ADMIN_API_KEY manquante
+#### Firebase connection error
 
-```bash
-cd backend
-openssl rand -hex 32
-# Ajouter le résultat dans backend/.env :
-# ADMIN_API_KEY=<clé_générée>
-```
-
-#### serviceAccountKey.json manquant
-
-```bash
-# Télécharger depuis Firebase Console
-# https://console.firebase.google.com/project/ai-pictionary-4f8f2/settings/serviceaccounts
-# Copier dans backend/serviceAccountKey.json
-```
-
----
-
-## 📊 Métriques de Performance
-
-| Métrique | Valeur | Note |
-|----------|--------|------|
-| **Taille modèle** | 140KB | Très léger |
-| **Paramètres** | 35K | Simple CNN |
-| **Inférence** | 5ms | Temps réel |
-| **Accuracy** | 91-93% | Sur test set |
-| **Debounce** | 500ms | UX optimisée |
-| **Dataset** | 1.4M images | 20 catégories |
-| **Bundle size** | 80KB | Gzipped |
+Vérifier `backend/serviceAccountKey.json` et les variables Firebase dans `.env.local`.
 
 ---
 
 ## 📚 Documentation Complémentaire
 
-- **[INFRASTRUCTURE.md](INFRASTRUCTURE.md)** — Configuration Firebase & Cloud Run
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** — Workflow développement avancé
-- **[PROJECT_STATUS.md](PROJECT_STATUS.md)** — État d'avancement du projet
-- **[TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md)** — Justifications techniques & ML
-- **[SECURITY_REMEDIATION.md](SECURITY_REMEDIATION.md)** — Procédures de sécurité
-
----
-
-## 🎯 Prochaines Étapes
-
-Consultez [PROJECT_STATUS.md](PROJECT_STATUS.md) pour voir l'état actuel et la roadmap complète.
-
-**Questions ?** Consultez [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) pour toutes les justifications techniques !
+- [DEVELOPMENT.md](DEVELOPMENT.md) — Workflow développement détaillé
+- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) — Configuration Firebase & Cloud Run
+- [PROJECT_STATUS.md](PROJECT_STATUS.md) — État d'avancement
+- [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) — Référence technique
