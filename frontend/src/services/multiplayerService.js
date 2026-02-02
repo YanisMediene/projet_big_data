@@ -568,7 +568,6 @@ export const sendChatMessage = async (roomCode, playerId, playerName, message, i
  */
 export const aiGuessedCorrectly = async (roomCode) => {
   const gameRef = ref(rtdb, `games/${roomCode}`);
-  const chatRef = ref(rtdb, `games/${roomCode}/chat`);
   
   const gameSnapshot = await get(gameRef);
   if (!gameSnapshot.exists()) return;
@@ -577,21 +576,6 @@ export const aiGuessedCorrectly = async (roomCode) => {
   
   // Don't end if round already finished
   if (gameData.roundStatus === 'finished' || gameData.roundWinner) return;
-  
-  // Add AI win message to chat
-  const snapshot = await get(chatRef);
-  const currentChat = snapshot.exists() ? snapshot.val() : [];
-  
-  const aiMessage = {
-    id: Date.now() + '_ai',
-    playerId: 'AI',
-    playerName: '🤖 IA',
-    message: gameData.currentWord,
-    isCorrect: true,
-    timestamp: Date.now()
-  };
-  
-  await set(chatRef, [...currentChat, aiMessage].slice(-50));
   
   // AI wins - no points for team, but AI gets points
   const currentAiScore = gameData.aiScore || 0;

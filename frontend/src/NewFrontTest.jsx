@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send, Loader2 } from 'lucide-react';
+import { Trash2, X, RefreshCw, Share2, SkipForward, AlertTriangle, User, Users, Zap, Plus, LogIn, Play, Copy, MessageSquare, Send, Loader2, Volume2 } from 'lucide-react';
 import { predictDrawing, getCategories } from './services/api';
 import { CATEGORY_MAP, FRENCH_TO_ENGLISH } from './data/categoryTranslations';
 import * as MultiplayerService from './services/multiplayerService';
+
+import audioService from './services/audioService';
+import AudioSettings from './components/AudioSettings';
 
 // Backend API URL
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
@@ -49,6 +52,9 @@ export default function QuickDrawApp() {
   
   // AI Score for Team mode (persistent across rounds)
   const [globalAiScore, setGlobalAiScore] = useState(0);
+
+  // Audio settings modal
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
 
   // Charger les catégories depuis l'API au démarrage
   useEffect(() => {
@@ -447,6 +453,23 @@ export default function QuickDrawApp() {
           onRestart={goToModeSelect}
         />
       )}
+
+      {/* Audio Settings Button (Floating) - Only on welcome screen */}
+      {gameState === 'WELCOME' && (
+        <button
+          onClick={() => setShowAudioSettings(true)}
+          className="fixed bottom-6 right-6 bg-blue-600 text-white border-4 border-black p-4 rounded-full shadow-lg hover:bg-blue-500 transition-colors z-40"
+          title="Paramètres Audio"
+        >
+          <Volume2 size={24} />
+        </button>
+      )}
+
+      {/* Audio Settings Modal */}
+      <AudioSettings 
+        isOpen={showAudioSettings} 
+        onClose={() => setShowAudioSettings(false)} 
+      />
     </div>
   );
 }
@@ -519,7 +542,10 @@ function WelcomeScreen({ onStart }) {
       </p>
       
       <button 
-        onClick={onStart}
+        onClick={() => {
+          audioService.playButtonClick();
+          onStart();
+        }}
         className="btn-shadow bg-blue-600 text-white border-4 border-black text-3xl px-12 py-4 rounded-sm hover:bg-blue-500 transition-colors duration-200 font-bold tracking-wider"
       >
         C'est parti !
@@ -570,7 +596,10 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Classic Mode */}
           <button 
-            onClick={onSelectClassic}
+            onClick={() => {
+              audioService.playButtonClick();
+              onSelectClassic();
+            }}
             className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
           >
             <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
@@ -582,7 +611,10 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
 
           {/* Race Mode */}
           <button 
-            onClick={onSelectRace}
+            onClick={() => {
+              audioService.playButtonClick();
+              onSelectRace();
+            }}
             className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
           >
              <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
@@ -594,7 +626,10 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
 
           {/* Team Mode */}
           <button 
-            onClick={onSelectTeam}
+            onClick={() => {
+              audioService.playButtonClick();
+              onSelectTeam();
+            }}
             className="group flex flex-col items-center p-6 border-4 border-black rounded-sm hover:bg-blue-50 transition-colors btn-shadow bg-white"
           >
              <div className="bg-blue-600 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
@@ -677,6 +712,10 @@ function TransitionOverlay({
           }
           return 0;
         }
+        // Play countdown sound
+        if (prev <= 5 && prev > 1) {
+          audioService.playCountdown(prev - 1);
+        }
         return prev - 1;
       });
     }, 1000);
@@ -711,6 +750,7 @@ function TransitionOverlay({
     console.log('🖱️ Ready clicked - isMultiplayer:', isMultiplayer, 'roomCode:', roomCode, 'playerId:', playerId, 'hasClickedReady:', hasClickedReady);
     
     if (isMultiplayer && roomCode && playerId && !hasClickedReady) {
+      audioService.play('playerReady');
       setHasClickedReady(true);
       try {
         console.log('📤 Marking player ready:', playerId);
@@ -722,6 +762,7 @@ function TransitionOverlay({
       }
     } else if (!isMultiplayer) {
       // Classic mode - just dismiss
+      audioService.play('roundStart');
       onDismiss();
     }
   };
@@ -969,6 +1010,9 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
       setLocalIsHost(false);
       onJoined(result.roomCode, result.playerId, false);
       setStep('WAITING_ROOM');
+      
+      // Play join sound
+      audioService.play('playerJoin');
     } catch (err) {
       console.error('Error joining game:', err);
       setError(err.message || 'Erreur lors de la connexion');
@@ -1025,7 +1069,10 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
                   {availableEmojis.map(emoji => (
                     <button
                       key={emoji}
-                      onClick={() => setPlayerEmoji(emoji)}
+                      onClick={() => {
+                        audioService.playButtonClick();
+                        setPlayerEmoji(emoji);
+                      }}
                       className={`text-2xl p-1.5 rounded-lg border-2 transition-all hover:scale-110 ${
                         playerEmoji === emoji 
                           ? 'border-blue-600 bg-blue-50 scale-110' 
@@ -1059,7 +1106,10 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
               <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><Plus size={28} /> Créer une partie</h3>
               <p className="text-gray-600 mb-4">Créez votre propre salon et invitez vos amis !</p>
               <button 
-                onClick={handleCreateGame} 
+                onClick={() => {
+                  audioService.playButtonClick();
+                  handleCreateGame();
+                }} 
                 disabled={isLoading}
                 className={`w-full py-4 ${themeColor} text-white border-4 border-black font-bold text-xl rounded-sm btn-shadow ${themeHover} transition-all disabled:opacity-50 flex items-center justify-center gap-2`}
               >
@@ -1081,7 +1131,10 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
                   maxLength={4}
                 />
                 <button 
-                  onClick={handleJoinGameByCode}
+                  onClick={() => {
+                    audioService.playButtonClick();
+                    handleJoinGameByCode();
+                  }}
                   disabled={isLoading}
                   className={`px-6 ${themeColor} text-white border-2 border-black font-bold rounded-sm btn-shadow ${themeHover} disabled:opacity-50`}
                 >
@@ -1103,7 +1156,10 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
                           <div className="text-xs text-gray-500">{game.playerCount}/{game.maxPlayers} Joueurs • {game.roomCode}</div>
                         </div>
                         <button 
-                          onClick={() => handleJoinExistingGame(game.roomCode)}
+                          onClick={() => {
+                            audioService.playButtonClick();
+                            handleJoinExistingGame(game.roomCode);
+                          }}
                           disabled={isLoading}
                           className="px-4 py-2 bg-white border-2 border-black text-sm font-bold rounded-sm hover:bg-blue-50 disabled:opacity-50"
                         >
@@ -1172,7 +1228,10 @@ function MultiplayerFlow({ mode, onBack, onStartGame, players, roomCode: existin
            <div className="flex justify-center">
               {localIsHost ? (
                 <button 
-                  onClick={onStartGame} 
+                  onClick={() => {
+                    audioService.playButtonClick();
+                    onStartGame();
+                  }} 
                   disabled={players.length < 2 || isLoading}
                   className={`px-12 py-4 border-4 border-black text-2xl font-bold rounded-sm ${themeColor} text-white btn-shadow ${themeHover} flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
@@ -1275,6 +1334,9 @@ function DrawingScreen({
     
     const unsubscribe = MultiplayerService.subscribeToChat(roomCode, (messages) => {
       console.log('📨 Chat messages received:', messages.length);
+      if (messages.length > 0) {
+        console.log('🔍 Last message:', messages[messages.length - 1]);
+      }
       setChatMessages(messages || []);
     });
     
@@ -1287,6 +1349,25 @@ function DrawingScreen({
       }
     };
   }, [isTeamMode, roomCode]);
+
+  // Play sound and TTS for new chat messages (TEAM mode)
+  useEffect(() => {
+    if (!isTeamMode || chatMessages.length === 0) return;
+    
+    // Get the last message
+    const lastMessage = chatMessages[chatMessages.length - 1];
+    
+    // Only play for messages not from current player
+    if (lastMessage.playerId !== playerId) {
+      // Play chat pop sound
+      audioService.play('chatMessage', 0.6);
+      
+      // If message is from AI, speak it
+      if (lastMessage.playerId === 'AI') {
+        audioService.speakAIGuess(lastMessage.message);
+      }
+    }
+  }, [chatMessages.length, isTeamMode, playerId]);
 
   // Subscribe to drawing updates (TEAM mode - viewers only)
   useEffect(() => {
@@ -1364,6 +1445,13 @@ function DrawingScreen({
         return;
     }
 
+    // Play urgency sounds
+    if (timeLeft === 10) {
+      audioService.play('tickUrgent');
+    } else if (timeLeft <= 5 && timeLeft > 0) {
+      audioService.play('tick');
+    }
+
     const timer = setInterval(() => {
       setTimeLeft(prev => prev - 1);
     }, 1000);
@@ -1394,12 +1482,23 @@ function DrawingScreen({
       // Check if AI wins (correct prediction with enough confidence)
       const aiIsCorrect = topPrediction.category === targetEnglish && topPrediction.confidence >= 0.25;
       
-      // Check if AI already sent this exact guess (avoid duplicates)
-      const hasAlreadySentThisGuess = chatMessages.some(
-        msg => msg.playerId === 'AI' && msg.message === aiGuess
+      // Check if AI already sent this exact guess as a CORRECT answer
+      const hasAlreadySentCorrectGuess = chatMessages.some(
+        msg => msg.playerId === 'AI' && msg.message === aiGuess && msg.isCorrect
       );
       
-      if (!hasAlreadySentThisGuess && topPrediction.confidence >= 0.15) {
+      // Check if AI already sent this guess as incorrect
+      const hasAlreadySentIncorrectGuess = chatMessages.some(
+        msg => msg.playerId === 'AI' && msg.message === aiGuess && !msg.isCorrect
+      );
+      
+      // Send message if:
+      // 1. Never sent this guess before, OR
+      // 2. Sent it as incorrect before, but now it's correct (confidence improved)
+      const shouldSend = (!hasAlreadySentCorrectGuess && topPrediction.confidence >= 0.15) && 
+                         (!hasAlreadySentIncorrectGuess || aiIsCorrect);
+      
+      if (shouldSend) {
         // Send AI guess to Firebase chat with isCorrect flag
         MultiplayerService.sendChatMessage(roomCode, 'AI', '🤖 IA', aiGuess, aiIsCorrect)
           .catch(console.error);
@@ -1432,6 +1531,18 @@ function DrawingScreen({
       }
     }
   }, [predictions, hasStartedDrawing, isPaused, showQuitConfirm, gameMode, word, players, chatMessages, isTeamMode, isDrawer, roomCode, roundFinished, gameData?.roundStatus]);
+
+  // TTS for AI predictions (all modes)
+  useEffect(() => {
+    if (!hasStartedDrawing || isPaused || predictions.length === 0) return;
+    
+    const topPrediction = predictions[0];
+    
+    // Speak prediction if confidence is significant
+    if (topPrediction.confidence >= 0.15) {
+      audioService.speakPrediction(topPrediction.categoryFr, topPrediction.confidence);
+    }
+  }, [predictions, hasStartedDrawing, isPaused]);
 
   // Local chat message (for non-Firebase mode)
   const addLocalChatMessage = (sender, text, isCorrect = false) => {
@@ -1732,6 +1843,21 @@ function DrawingScreen({
     if (roundFinished) return;
     setRoundFinished(true);
     
+    // Play sound effects based on game mode and result
+    if (gameMode === 'RACE' && winner === playerId) {
+      audioService.play('roundSuccess');
+    } else if (gameMode === 'RACE' && winner && winner !== playerId) {
+      audioService.play('roundFail');
+    } else if (gameMode === 'TEAM' && winner === 'TEAM') {
+      audioService.play('teamWin');
+    } else if (gameMode === 'TEAM' && winner === 'AI') {
+      audioService.play('aiWins');
+    } else if (gameMode === 'CLASSIC' && success) {
+      audioService.play('roundSuccess');
+    } else if (gameMode === 'CLASSIC' && !success) {
+      audioService.play('roundFail');
+    }
+    
     // Get top prediction confidence for scoring
     const topConfidence = predictions.length > 0 ? predictions[0].confidence : 0;
     
@@ -1794,6 +1920,11 @@ function DrawingScreen({
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
+    
+    // Play sound on first draw
+    if (!hasStartedDrawing) {
+      audioService.play('startDrawing', 0.5);
+    }
     setHasStartedDrawing(true);
   };
 
@@ -1871,6 +2002,9 @@ function DrawingScreen({
     setHasStartedDrawing(false);
     setPredictions([]);
     setAiText("Je ne vois rien pour l'instant...");
+    
+    // Play erase sound
+    audioService.play('clearCanvas');
   };
 
   // Configuration du canvas plein écran
@@ -2081,7 +2215,10 @@ function DrawingScreen({
           {/* Clear button - only for drawer or non-team modes */}
           {!isViewer ? (
             <button 
-                onClick={clearCanvas} 
+                onClick={() => {
+                  audioService.playButtonClick();
+                  clearCanvas();
+                }} 
                 className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group" 
                 title="Effacer"
             >
@@ -2096,7 +2233,10 @@ function DrawingScreen({
                {/* Skip Button - Masqué en mode Race et Team */}
               {gameMode !== 'RACE' && gameMode !== 'TEAM' && (
                 <button 
-                    onClick={() => finishRound(false)} 
+                    onClick={() => {
+                      audioService.playButtonClick();
+                      finishRound(false);
+                    }} 
                     className="flex items-center gap-2 p-2 hover:bg-gray-200 rounded-full transition-colors group"
                     title="Passer"
                 >
@@ -2106,7 +2246,10 @@ function DrawingScreen({
           </div>
 
           <button 
-              onClick={() => setShowQuitConfirm(true)} 
+              onClick={() => {
+                audioService.playButtonClick();
+                setShowQuitConfirm(true);
+              }} 
               className="p-2 hover:bg-gray-200 rounded-full transition-colors group" 
               title="Quitter"
           >
@@ -2346,7 +2489,10 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore 
       </div>
 
       <button 
-        onClick={onRestart}
+        onClick={() => {
+          audioService.playButtonClick();
+          onRestart();
+        }}
         className="btn-shadow bg-blue-600 text-white border-4 border-black text-2xl px-12 py-4 rounded-sm hover:bg-blue-500 transition-colors font-bold mb-20 flex items-center gap-3"
       >
         <RefreshCw size={24} /> Rejouer
