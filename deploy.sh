@@ -89,7 +89,8 @@ deploy_backend() {
         --memory 2Gi \
         --cpu 2 \
         --min-instances 0 \
-        --max-instances 10
+        --max-instances 10 \
+        --env-vars-file env.yaml
     
     cd ..
     
