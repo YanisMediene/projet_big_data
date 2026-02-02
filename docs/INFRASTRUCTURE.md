@@ -522,11 +522,18 @@ Créer `backend/env.yaml` :
 
 ```yaml
 # Model configuration
-MODEL_VERSION: "v1.0.0"
-MODEL_PATH: "/app/models/quickdraw_v1.0.0.h5"
+MODEL_VERSION: "v4.0.0"
+MODEL_PATH: "/app/models/quickdraw_v4.0.0.h5"
 
-# Categories (20 Quick Draw classes)
-CATEGORIES: "apple,sun,tree,house,car,cat,fish,star,umbrella,flower,moon,airplane,bicycle,clock,eye,cup,shoe,cloud,lightning,smiley_face"
+# Firebase Realtime Database (Team vs IA mode)
+FIREBASE_DATABASE_URL: "https://ai-pictionary-4f8f2-default-rtdb.firebaseio.com"
+
+# Categories (loaded automatically from metadata)
+# NOTE: Categories are now loaded from models/quickdraw_{MODEL_VERSION}_metadata.json
+# Available versions:
+#   - v1.0.0: 20 categories (91-93% accuracy, 140KB)
+#   - v4.0.0: 50 categories (90.2% accuracy, 30.1MB) [DEFAULT]
+#   - v3.0.0: 345 categories (73% accuracy, 30.1MB)
 
 # CORS configuration
 CORS_ORIGINS: "http://localhost:3000,https://ai-pictionary-4f8f2.web.app,https://ai-pictionary-4f8f2.firebaseapp.com"
@@ -778,6 +785,46 @@ gcloud scheduler jobs create http retrain-model-weekly \
   --attempt-deadline=3600s \
   --project=${PROJECT_ID}
 ```
+
+**Endpoints Admin de Maintenance Supplémentaires :**
+
+En plus du `/admin/retrain`, le backend expose des endpoints de nettoyage qui peuvent aussi être automatisés :
+
+```bash
+# Créer jobs de nettoyage (optionnel)
+
+# 1. Nettoyer jeux inactifs (tous les jours à 3h)
+gcloud scheduler jobs create http cleanup-old-games \
+  --schedule="0 3 * * *" \
+  --location=europe-west1 \
+  --time-zone="Europe/Paris" \
+  --uri="${SERVICE_URL}/admin/cleanup/old-games" \
+  --http-method=POST \
+  --headers="Authorization=Bearer ${ADMIN_API_KEY}"
+
+# 2. Nettoyer sessions abandonnées (tous les lundis à 4h)
+gcloud scheduler jobs create http cleanup-old-sessions \
+  --schedule="0 4 * * 1" \
+  --location=europe-west1 \
+  --time-zone="Europe/Paris" \
+  --uri="${SERVICE_URL}/admin/cleanup/old-sessions" \
+  --http-method=POST \
+  --headers="Authorization=Bearer ${ADMIN_API_KEY}"
+
+# 3. Nettoyer dessins orphelins (tous les mardis à 5h)
+gcloud scheduler jobs create http cleanup-orphaned-drawings \
+  --schedule="0 5 * * 2" \
+  --location=europe-west1 \
+  --time-zone="Europe/Paris" \
+  --uri="${SERVICE_URL}/admin/cleanup/orphaned-drawings" \
+  --http-method=POST \
+  --headers="Authorization=Bearer ${ADMIN_API_KEY}"
+```
+
+Ces endpoints :
+- `/admin/cleanup/old-games` : Supprime jeux inactifs >7 jours
+- `/admin/cleanup/old-sessions` : Supprime sessions abandonnées >30 jours
+- `/admin/cleanup/orphaned-drawings` : Supprime dessins sans référence Firestore
 
 #### Option B : Via Console
 

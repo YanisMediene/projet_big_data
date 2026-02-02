@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Model configuration
-MODEL_VERSION = os.getenv("MODEL_VERSION", "v3.0.0")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "v4.0.0")
 CATEGORIES = []  # Will be loaded from metadata
 
 

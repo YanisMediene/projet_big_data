@@ -68,14 +68,19 @@ ADMIN_API_KEY=your_secure_random_key_here
 
 # Firebase
 FIREBASE_CREDENTIALS_PATH=./serviceAccountKey.json
+FIREBASE_DATABASE_URL=https://ai-pictionary-4f8f2-default-rtdb.firebaseio.com
+
+# Firebase Emulators (pour développement local)
+USE_FIRESTORE_EMULATOR=false
+USE_RTDB_EMULATOR=false
 
 # Environnement
 ENVIRONMENT=development
 DEBUG=True
 
-# Model
-MODEL_VERSION=v1.0.0
-MODEL_PATH=./models/quickdraw_v1.0.0.h5
+# Model (v4.0.0 = 50 classes par défaut)
+MODEL_VERSION=v4.0.0
+MODEL_PATH=./models/quickdraw_v4.0.0.h5
 ```
 
 ### 🔄 Switcher entre les Versions du Modèle
@@ -90,6 +95,9 @@ MODEL_PATH=./models/quickdraw_v1.0.0.h5
 # Pour utiliser le modèle 20 classes (v1.0.0)
 MODEL_VERSION=v1.0.0
 
+# Pour utiliser le modèle 50 classes (v4.0.0) - RECOMMANDÉ
+MODEL_VERSION=v4.0.0
+
 # Pour utiliser le modèle 345 classes (v3.0.0)
 MODEL_VERSION=v3.0.0
 ```
@@ -101,6 +109,9 @@ MODEL_VERSION=v3.0.0
 ```yaml
 # Pour utiliser le modèle 20 classes
 MODEL_VERSION: "v1.0.0"
+
+# Pour utiliser le modèle 50 classes (v4.0.0) - RECOMMANDÉ
+MODEL_VERSION: "v4.0.0"
 
 # Pour utiliser le modèle 345 classes
 MODEL_VERSION: "v3.0.0"
@@ -114,6 +125,7 @@ Le système charge :
 
 **Exemple :**
 - `MODEL_VERSION=v1.0.0` → 20 classes (apple, sun, tree, ...)
+- `MODEL_VERSION=v4.0.0` → 50 classes (cat, dog, fish, bird, ...) **[DÉFAUT]**
 - `MODEL_VERSION=v3.0.0` → 345 classes (aircraft carrier, airplane, ...)
 
 **Après modification :** 

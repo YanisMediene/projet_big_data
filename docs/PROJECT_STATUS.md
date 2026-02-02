@@ -137,20 +137,31 @@ Input (28x28x1)
 
 ### ✅ 1. Système d'Authentification (100%)
 
-**Fichiers :**
-- `frontend/src/contexts/AuthContext.jsx`
-- `frontend/src/components/Auth/LoginModal.jsx`
-- `frontend/src/components/Auth/SignUpForm.jsx`
-- `frontend/src/components/Auth/UserProfile.jsx`
+**Fichier principal :**
+- `frontend/src/NewFrontTest.jsx` (2356 lignes - composant monolithique)
+
+**Composants auxiliaires :**
+- `frontend/src/components/shared/ConnectionStatus.jsx`
+- `frontend/src/components/shared/Toast.jsx`
 
 **Fonctionnalités :**
 - ✅ Google Sign-In (OAuth 2.0)
 - ✅ Email/Password authentication
 - ✅ Profils utilisateurs Firestore (auto-création)
-- ✅ State management (React Context)
+- ✅ State management intégré (useState/useEffect)
 - ✅ Token-based auth
 - ✅ Statistiques utilisateur (dessins, corrections, parties, winrate)
 - ✅ UI responsive avec dropdowns
+
+**Architecture :**
+- 💡 **Note :** L'application utilise actuellement une approche monolithique avec tout le code dans `NewFrontTest.jsx`. Les composants listés ci-dessous sont des **sections logiques** du fichier, pas des fichiers séparés.
+
+**Sections dans NewFrontTest.jsx :**
+- Section Authentication (lignes ~100-250)
+- Section Drawing Canvas (lignes ~500-800)
+- Section Prediction Display (lignes ~800-1000)
+- Section Settings (lignes ~1200-1400)
+- Section Multiplayer (lignes ~1500-2200)
 
 **Collections Firestore :**
 ```
@@ -170,7 +181,7 @@ users/{userId}
 ### ✅ 2. Active Learning Pipeline (100%)
 
 **Fichiers :**
-- `frontend/src/components/CorrectionModal.jsx` (modifié)
+- `frontend/src/NewFrontTest.jsx` (modal de correction intégrée)
 - `backend/services/firestore_service.py` (15 méthodes)
 - `backend/services/storage_service.py` (11 méthodes)
 - `ml-training/scripts/retrain_pipeline.py` (560 lignes)
@@ -214,6 +225,9 @@ python ml-training/scripts/retrain_pipeline.py \
 - ✅ `POST /admin/retrain` - Déclenche pipeline ML (Bearer auth)
 - ✅ `GET /admin/retrain/status/{job_id}` - Statut du job
 - ✅ `GET /admin/health` - Health check admin
+- ✅ `POST /admin/cleanup/old-games` - Nettoie jeux inactifs (>7j)
+- ✅ `POST /admin/cleanup/old-sessions` - Nettoie sessions abandonnées (>30j)
+- ✅ `POST /admin/cleanup/orphaned-drawings` - Nettoie dessins orphelins
 
 **Sécurité :**
 - Admin API Key (Bearer token)
@@ -240,9 +254,8 @@ openssl rand -hex 32
 
 **Fichiers :**
 - `backend/routers/games.py` (6 endpoints)
-- `frontend/src/components/Multiplayer/GameLobby.jsx`
-- `frontend/src/components/Multiplayer/RaceMode.jsx`
-- `frontend/src/components/Multiplayer/Multiplayer.css`
+- `frontend/src/NewFrontTest.jsx` (section multiplayer intégrée)
+- `frontend/src/index.css` (styles multiplayer)
 
 **Backend Endpoints :**
 - ✅ `POST /games/race/create` - Créer lobby

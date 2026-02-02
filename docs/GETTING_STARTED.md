@@ -129,7 +129,7 @@ jupyter notebook notebooks/train_model.ipynb
 3. Attendre la fin de l'entraînement (15 epochs)
 4. Le modèle sera sauvegardé dans `backend/models/quickdraw_v1.0.0.h5`
 
-**💡 Note :** Par défaut, le système utilise le modèle v1.0.0 (20 classes). Pour utiliser le modèle v3.0.0 (345 classes) déjà entraîné, modifiez `MODEL_VERSION=v3.0.0` dans `backend/.env`
+**💡 Note :** Par défaut, le système utilise le modèle v4.0.0 (50 classes, 90.2% accuracy). Pour utiliser le modèle v1.0.0 (20 classes) ou v3.0.0 (345 classes) déjà entraîné, modifiez `MODEL_VERSION=v1.0.0` ou `MODEL_VERSION=v3.0.0` dans `backend/.env`
 
 ### 🚀 Étape 5 : Lancer l'Application (2 min)
 

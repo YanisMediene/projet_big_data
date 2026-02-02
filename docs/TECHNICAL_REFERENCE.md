@@ -43,6 +43,17 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 
 ### Key Performance Metrics
 
+**Model v4.0.0 (50 classes) - PRODUCTION :**
+
+| Metric | Value | Target | Status |
+|--------|-------|--------|--------|
+| **Model Accuracy** | 90.2% | >85% | ✅ Exceeded |
+| **Inference Latency** | 12-18ms | <50ms | ✅ Exceeded |
+| **End-to-End Latency** | 120-350ms | <500ms | ✅ Exceeded |
+| **Model Size** | 30.1 MB | <50MB | ✅ Met |
+| **Monthly Cost (100 DAU)** | <$1 | <$10 | ✅ Exceeded |
+| **Cold Start Time** | 5-8s | <10s | ✅ Met |
+
 **Model v1.0.0 (20 classes) :**
 
 | Metric | Value | Target | Status |
@@ -69,8 +80,8 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 Le système supporte plusieurs versions de modèle via la variable `MODEL_VERSION` :
 
 **Configuration :**
-- Développement : `backend/.env` → `MODEL_VERSION=v3.0.0`
-- Production : `backend/env.yaml` → `MODEL_VERSION: "v3.0.0"`
+- Développement : `backend/.env` → `MODEL_VERSION=v4.0.0`
+- Production : `backend/env.yaml` → `MODEL_VERSION: "v4.0.0"`
 
 **Chargement automatique :**
 - Modèle : `models/quickdraw_{MODEL_VERSION}.h5`
@@ -78,7 +89,14 @@ Le système supporte plusieurs versions de modèle via la variable `MODEL_VERSIO
 
 **Versions disponibles :**
 - `v1.0.0` : 20 classes, 140 KB, 91-93% accuracy
+- `v4.0.0` : 50 classes, 30.1 MB, 90.2% accuracy **[PRODUCTION]**
 - `v3.0.0` : 345 classes, 30.1 MB, 73% accuracy
+
+**Architecture v4.0.0 :**
+- Même architecture CNN que v3.0.0
+- Seule la dernière couche Dense change (50 sorties au lieu de 345)
+- Ré-entraînement avec 50 catégories populaires du dataset Quick Draw
+- Équilibre optimal entre précision (90.2%) et variété de classes
 
 ### Production URLs
 
