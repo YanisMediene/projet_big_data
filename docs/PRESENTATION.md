@@ -869,36 +869,37 @@ DIAGRAMME DES COMMUNICATIONS
         ▼                                   ▼                               ▼
 ┌───────────────┐               ┌───────────────────┐               ┌───────────────┐
 │ FIREBASE      │               │   CLOUD RUN       │               │  FIREBASE     │
-│ HOSTING       │             ┌►│   (Backend)       │               │  RTDB         │
-│ (CDN)         │             │ │                   │               │               │
-│ :443 HTTPS    │             │ │ :443 HTTPS        │               │ :443 WSS      │
-└───────────────┘             │ └───────────────────┘               └───────────────┘
-        ↑                     │    │    │       │                       ↑   │
-        │ 1. GET index.html   │    │    │       │                       │   │
-        │    + JS/CSS (80KB)  │    │    │       │ 4. Admin SDK          │   │
-        │                     │    │    │       │    (gRPC)             │   │
-        │                     │    │    │       ▼                       │   │
-┌───────────────┐             │    │    │ ┌───────────────────┐         │   │
-│   BROWSER     │─────────────┘    │    │ │    FIRESTORE      │         │   │
-│   (Client)    │ 2. REST API      │    │ │    (Database)     │         │   │
-│               │    /predict      │    │ │ corrections,      │         │   │
-│               │    /health       │    │ │ game metadata     │         │   │
-│               │    /categories   │    │ └───────────────────┘         │   │
-│               │                  │    │                               │   │
-│               │ 3. WebSocket     │    │ 5. Admin SDK                  │   │
-│               │    (RTDB)        │    │    (présence)                 │   │
-│               │◄─────────────────┼────┴───────────────────────────────┘   │
-│               │                  │                                        │
-└───────────────┘                  │ 6. Admin SDK ┌───────────────────┐     │
-                                   └─────────────►│  FIREBASE STORAGE │     │
-                                                  │ (models, drawings)│     │
-                                                  └───────────────────┘     │
+│ HOSTING       │             ┌►│   (Backend)       │ ─────┐        │  RTDB         │
+│ (CDN)         │             │ │                   │      │        │               │
+│ :443 HTTPS    │             │ │ :443 HTTPS        │      │        │ :443 WSS      │
+└───────────────┘             │ └───────────────────┘      │        └───────────────┘
+        ↑                     │    │    │                  ▼            ↑   │
+        │                     │    │    │    ┌────────────────────┐     │   │
+        │                     │    │    │    │  FIREBASE STORAGE  │     │   │
+        │                     │    │    │    │ (models, drawings) │     │   │
+        │                     │    │    │    └────────────────────┘     │   │
+        │ 1. GET index.html   │    │    │                               │   │
+        │    + JS/CSS (80KB)  │    │    │ 4. Admin SDK                  │   │
+        │                     │    │    │ (gRPC)                        │   │
+        │                     │    │    ▼                               │   │
+┌───────────────┐             │    │   ┌───────────────────┐            │   │
+│   BROWSER     │─────────────┘    │   │    FIRESTORE      │            │   │
+│   (Client)    │ 2. REST API      │   │    (Database)     │            │   │
+│               │    /predict      │   │ corrections,      │            │   │
+│               │    /health       │   │ game metadata     │            │   │
+│               │    /categories   │   └───────────────────┘            │   │
+│               │                  │                                    │   │
+│               │ 3. WebSocket     │ 5. Admin SDK                       │   │
+│               │    (RTDB)        │ (présence)                         │   │
+│               │◄─────────────────┼────────────────────────────────────┘   │
+│               │                                                           │
+└───────────────┘                                                           │
                                                                             │
-        (Optionnel - Non configuré en prod)                                 │
-        ┌───────────────┐ 7. HTTPS POST /admin/retrain                      │
-        │ CLOUD         │───────────────────────────────────────────────────┘
-        │ SCHEDULER     │
-        └───────────────┘
+                              (Optionnel - Non configuré en prod)           │
+                            ┌───────────────┐ 7. HTTPS POST /admin/retrain  │
+                            │ CLOUD         │───────────────────────────────┘
+                            │ SCHEDULER     │
+                            └───────────────┘
 
 DÉTAIL DES COMMUNICATIONS
 ━━━━━━━━━━━━━━━━━━━━━━━━━
