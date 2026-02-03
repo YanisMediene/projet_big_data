@@ -310,17 +310,18 @@ ARCHITECTURE CNN v4.0.0
 ━━━━━━━━━━━━━━━━━━━━━━━
 
 INPUT                    CONV BLOCK 1              CONV BLOCK 2
-(28, 28, 1)        →     (26, 26, 32)        →    (11, 11, 64)
-                         Conv2D(32, 3×3)          Conv2D(64, 3×3)
-                         ReLU                      ReLU
+(28, 28, 1)        →     (28, 28, 64)        →    (14, 14, 128)
+                         Conv2D(64, 3×3, same)    Conv2D(128, 3×3, same)
+                         Conv2D(64, 3×3, same)    Conv2D(128, 3×3, same)
                          MaxPool(2×2)              MaxPool(2×2)
-                         → (13, 13, 32)            → (5, 5, 64)
+                         → (14, 14, 64)            → (7, 7, 128)
 
 CONV BLOCK 3             FLATTEN                  DENSE
-(3, 3, 64)         →     (576,)             →    (128,)
-Conv2D(64, 3×3)                                   Dense(128)
-ReLU                                              ReLU
-(pas de pooling)                                  Dropout(0.5)
+(7, 7, 256)        →     (2304,)            →    (512,)
+Conv2D(256, 3×3, same)                            Dense(512)
+Conv2D(256, 3×3, same)                            ReLU
+MaxPool(2×2)                                      Dropout(0.5)
+→ (3, 3, 256)
 
 OUTPUT
 (50,)
@@ -332,24 +333,28 @@ PARAMÈTRES PAR COUCHE
 ┌─────────────────┬────────────┬──────────────┐
 │ Couche          │ Paramètres │ Output Shape │
 ├─────────────────┼────────────┼──────────────┤
-│ Conv2D_1        │ 320        │ (26,26,32)   │
-│ MaxPool_1       │ 0          │ (13,13,32)   │
-│ Conv2D_2        │ 18,496     │ (11,11,64)   │
-│ MaxPool_2       │ 0          │ (5,5,64)     │
-│ Conv2D_3        │ 36,928     │ (3,3,64)     │
-│ Flatten         │ 0          │ (576,)       │
-│ Dense_1         │ 73,856     │ (128,)       │
-│ Dropout         │ 0          │ (128,)       │
-│ Dense_2 (out)   │ 6,450      │ (50,)        │
+│ Conv2D_1        │ 640        │ (28,28,64)   │
+│ Conv2D_2        │ 36,928     │ (28,28,64)   │
+│ MaxPool_1       │ 0          │ (14,14,64)   │
+│ Conv2D_3        │ 73,856     │ (14,14,128)  │
+│ Conv2D_4        │ 147,584    │ (14,14,128)  │
+│ MaxPool_2       │ 0          │ (7,7,128)    │
+│ Conv2D_5        │ 295,168    │ (7,7,256)    │
+│ Conv2D_6        │ 590,080    │ (7,7,256)    │
+│ MaxPool_3       │ 0          │ (3,3,256)    │
+│ Flatten         │ 0          │ (2304,)      │
+│ Dense_1         │ 1,180,160  │ (512,)       │
+│ Dropout         │ 0          │ (512,)       │
+│ Dense_2 (out)   │ 25,650     │ (50,)        │
 ├─────────────────┼────────────┼──────────────┤
-│ TOTAL           │ ~136,000   │              │
+│ TOTAL           │ 2,350,066  │              │
 └─────────────────┴────────────┴──────────────┘
 
-Taille modèle : 30.1 MB (float32 + overhead Keras)
+Taille modèle : 8.96 MB (float32)
 ```
 
 ### 🎤 Script présentateur
-> "Voici notre architecture en détail. Entrée 28×28×1, trois blocs convolutionnels, flatten, dense avec dropout, et sortie softmax à 50 classes. Quelques choix importants : les deux premiers blocs ont un MaxPooling pour réduire la dimensionnalité, mais pas le troisième - nous voulons conserver les features spatiales avant le flatten. La couche dense fait 128 neurones avec un dropout de 0.5 pour la régularisation. Au total, environ 136 000 paramètres. Le modèle fait 30 MB principalement à cause du format float32 et des métadonnées Keras."
+> "Voici notre architecture en détail. Entrée 28×28×1, trois blocs convolutionnels avec deux couches chacun, flatten, dense avec dropout, et sortie softmax à 50 classes. Chaque bloc utilise le padding 'same' pour conserver la résolution, puis un MaxPooling pour réduire la dimensionnalité. Les filtres doublent à chaque bloc : 64, 128, puis 256. La couche dense fait 512 neurones avec un dropout de 0.5 pour la régularisation. Au total, environ 2.35 millions de paramètres. Le modèle fait 8.96 MB en float32."
 
 ### 📚 Informations de fond
 - **Code :** TECHNICAL_REFERENCE.md
@@ -357,12 +362,12 @@ Taille modèle : 30.1 MB (float32 + overhead Keras)
 - **Modèle sauvé :** quickdraw_v4.0.0.h5
 
 ### ❓ Questions potentielles
-1. **"Pourquoi 3 couches convolutionnelles ?"**
-   - Suffisant pour images 28×28 ; plus de couches = overfitting sans gain
+1. **"Pourquoi 6 couches convolutionnelles ?"**
+   - Architecture VGG-like : deux convolutions par bloc permettent d'apprendre des features plus complexes
 2. **"Pourquoi pas de BatchNormalization ?"**
    - Testé, gain marginal (<0.5%), complexité ajoutée non justifiée
-3. **"30 MB pour 136K paramètres, n'est-ce pas beaucoup ?"**
-   - Float32 (4 bytes × 136K = 544KB) + métadonnées Keras/TF ; peut être réduit avec quantization
+3. **"Pourquoi doubler les filtres à chaque bloc ?"**
+   - Standard VGG : compense la perte de résolution spatiale par plus de features
 
 ---
 
@@ -380,15 +385,15 @@ VALIDATION DES HYPERPARAMÈTRES
 
 CONFIGURATIONS TESTÉES
 ━━━━━━━━━━━━━━━━━━━━━━
-┌─────────────────────┬──────────┬──────────┬───────────┐
-│ Configuration       │ Val Acc  │ Overfit? │ Verdict   │
-├─────────────────────┼──────────┼──────────┼───────────┤
-│ 2 Conv, Dense 256   │ 85.3%    │ Oui      │ ❌        │
-│ 3 Conv, Dense 256   │ 88.7%    │ Léger    │ ⚠️        │
-│ 3 Conv, Dense 128   │ 90.2%    │ Non      │ ✅        │
-│ 4 Conv, Dense 128   │ 90.1%    │ Non      │ ❌ Inutile│
-│ 3 Conv, Dense 64    │ 87.4%    │ Non      │ ❌        │
-└─────────────────────┴──────────┴──────────┴───────────┘
+┌───────────────────────────┬──────────┬──────────┬───────────┐
+│ Configuration             │ Val Acc  │ Overfit? │ Verdict   │
+├───────────────────────────┼──────────┼──────────┼───────────┤
+│ 3 Conv, Dense 128         │ 87.1%    │ Non      │ ❌        │
+│ 4 Conv, Dense 256         │ 88.5%    │ Léger    │ ⚠️        │
+│ 6 Conv (VGG), Dense 256   │ 89.4%    │ Léger    │ ⚠️        │
+│ 6 Conv (VGG), Dense 512   │ 90.2%    │ Non      │ ✅        │
+│ 6 Conv (VGG), Dense 1024  │ 90.0%    │ Oui      │ ❌        │
+└───────────────────────────┴──────────┴──────────┴───────────┘
 
 HYPERPARAMÈTRES FINAUX
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -396,20 +401,23 @@ HYPERPARAMÈTRES FINAUX
 │ Hyperparamètre      │ Valeur      │ Justification                   │
 ├─────────────────────┼─────────────┼─────────────────────────────────┤
 │ Learning Rate       │ 0.001       │ Standard Adam, stable           │
-│ Batch Size          │ 128         │ Bon compromis GPU/généralisation│
-│ Epochs              │ 15          │ Early stopping atteint          │
+│ Batch Size          │ 512         │ Maximise utilisation GPU Colab  │
+│ Epochs              │ 20          │ Early stopping atteint avant    │
 │ Dropout             │ 0.5         │ Régularisation agressive        │
 │ Optimizer           │ Adam        │ Adaptatif, peu de tuning        │
 │ Loss                │ Categorical │ Multi-classe standard           │
 │                     │ Crossentropy│                                 │
 └─────────────────────┴─────────────┴─────────────────────────────────┘
 
-EARLY STOPPING
-━━━━━━━━━━━━━━
-• Patience : 3 epochs
-• Monitor : val_loss
-• Restore best weights : Oui
-• Epoch optimal : ~12-13
+CALLBACKS D'ENTRAÎNEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────┬─────────────────────────────────────────────┐
+│ Callback            │ Configuration                               │
+├─────────────────────┼─────────────────────────────────────────────┤
+│ EarlyStopping       │ patience=4, monitor=val_loss, restore=True  │
+│ ModelCheckpoint     │ monitor=val_accuracy, save_best_only=True   │
+│ ReduceLROnPlateau   │ factor=0.5, patience=2, min_lr=1e-5         │
+└─────────────────────┴─────────────────────────────────────────────┘
 
 POURQUOI PAS DE DATA AUGMENTATION ?
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -419,20 +427,20 @@ POURQUOI PAS DE DATA AUGMENTATION ?
 ```
 
 ### 🎤 Script présentateur
-> "Nous avons testé plusieurs configurations. Deux couches conv sous-performaient à 85%. Trois couches avec 256 neurones dense donnaient 88.7% mais avec léger overfitting. Notre configuration finale - 3 conv, 128 dense - atteint 90.2% sans overfitting. Quatre couches n'apportent rien de plus. Pour les hyperparamètres : learning rate 0.001 standard pour Adam, batch size 128 qui équilibre utilisation GPU et généralisation, dropout 0.5 pour régularisation agressive. L'early stopping arrête l'entraînement vers l'epoch 12-13. Notez l'absence de data augmentation : le dataset Quick Draw est déjà naturellement varié, et des transformations comme la rotation altèreraient la sémantique."
+> "Nous avons testé plusieurs configurations. L'architecture simple à 3 conv plafonnait à 87%. En passant à une architecture VGG-like avec 6 couches convolutionnelles et 512 neurones dense, nous atteignons 90.2% sans overfitting. Pour les hyperparamètres : learning rate 0.001 standard pour Adam, batch size 512 pour maximiser l'utilisation du GPU Colab. Nous utilisons trois callbacks clés : EarlyStopping avec patience 4 pour arrêter l'entraînement au bon moment, ModelCheckpoint pour sauvegarder le meilleur modèle, et ReduceLROnPlateau qui divise le learning rate par 2 si la val_loss stagne. Notez l'absence de data augmentation : le dataset Quick Draw est déjà naturellement varié."
 
 ### 📚 Informations de fond
 - **Notebooks :** train_model.ipynb
 - **TensorBoard :** Logs dans logs
-- **Early stopping :** Évite l'overfitting tout en maximisant l'apprentissage
+- **ReduceLROnPlateau :** Permet un fine-tuning automatique du learning rate
 
 ### ❓ Questions potentielles
-1. **"Avez-vous fait un grid search formel ?"**
-   - Grid search léger sur les combinaisons clés ; ressources Colab limitées
+1. **"Pourquoi un batch size de 512 ?"**
+   - Maximise l'utilisation GPU Colab (~33% VRAM) ; accélère l'entraînement sans impact sur la généralisation
 2. **"Pourquoi Adam plutôt que SGD ?"**
    - Adam adaptatif nécessite moins de tuning LR, converge plus vite
 3. **"Le dropout 0.5 n'est-il pas trop agressif ?"**
-   - Non, dataset très varié + modèle relativement simple = régularisation forte bénéfique
+   - Non, avec 2.35M paramètres, une régularisation forte est nécessaire
 
 ---
 
@@ -1431,7 +1439,7 @@ MERCI ! QUESTIONS ?
 | 14 | Flux Réseau | Communications inter-services |
 | 15 | Firebase Services | Justification (14) |
 | 16 | Cloud Run | Justification (15) |
-| 17 | Flux Classic | Données mode solo (16) |
+| 17 | Flux Classic | Données mode solo (16) | 
 | 18 | Flux Multiplayer | Dual-database (17) |
 | 19 | State Machine | États du jeu (18) |
 | 20 | Démo & Conclusion | Récapitulatif (20) |
