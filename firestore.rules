@@ -26,6 +26,21 @@ service cloud.firestore {
       allow update, delete: if isOwner(resource.data.user_id);
     }
     
+    // User Drawings - Collection pour l'active learning
+    // Permet la création publique pour maximiser la collecte de données
+    match /user_drawings/{drawingId} {
+      allow read: if true; // Lecture publique pour stats
+      allow create: if true; // Création publique (rate limited côté backend)
+      allow update: if false; // Seul le backend peut marquer comme utilisé
+      allow delete: if false; // Pas de suppression
+    }
+    
+    // Training Runs - Historique des entraînements
+    match /training_runs/{runId} {
+      allow read: if true; // Lecture publique pour stats
+      allow write: if false; // Seul le backend peut écrire
+    }
+    
     // Sessions utilisateurs - Privé
     match /sessions/{sessionId} {
       allow read: if isAuthenticated() && isOwner(resource.data.user_id);

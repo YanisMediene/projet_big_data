@@ -652,23 +652,28 @@ ML       : Entraînement offline, génération modèles
 ARCHITECTURE FRONTEND : MONOLITHE INTENTIONNEL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📄 NewFrontTest.jsx (2502 lignes)
+📄 NewFrontTest.jsx (~3000 lignes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 COMPOSANTS INLINE
 ─────────────────
 • WelcomeScreen       (lignes ~100-200)   → Accueil + health check
-• GameModeSelection   (lignes ~200-350)   → Choix Classic/Race/Team
+• GameModeSelection   (lignes ~200-350)   → Choix des 5 modes
 • TransitionOverlay   (lignes ~350-450)   → Animations rounds
 • MultiplayerFlow     (lignes ~450-800)   → Lobby + waiting
 • PlayingScreen       (lignes ~800-2000)  → Canvas + jeu
-• GameOverScreen      (lignes ~2000-2200) → Résultats
+• FreeCanvasScreen    (lignes ~2000-2400) → Mode test libre
+• InfiniteGameScreen  (lignes ~2400-2800) → Mode sans fin
+• GameOverScreen      (lignes ~2800-3000) → Résultats
 
 STATE MACHINE
 ─────────────
 WELCOME → MODE_SELECT → LOBBY_FLOW → PLAYING → GAME_OVER
-                ↑                                  │
-                └──────────────────────────────────┘
+                │             ↑                    │
+                │             └────────────────────┘
+                │
+                ├─→ FREE_CANVAS (test libre)
+                └─→ INFINITE (mode sans fin)
 
 JUSTIFICATION MONOLITHE
 ━━━━━━━━━━━━━━━━━━━━━━━
@@ -686,7 +691,7 @@ COMPOSANTS EXTRAITS (réutilisables)
 ```
 
 ### 🎤 Script présentateur
-> "Notre frontend utilise une architecture monolithique **intentionnelle**. Le fichier NewFrontTest.jsx contient tous les écrans en composants inline. Pourquoi ce choix ? Dans un jeu avec de nombreuses transitions d'état - accueil, sélection mode, lobby, jeu, résultats - partager l'état entre composants séparés nécessiterait Context API ou Redux. Avec un monolithe, tous les useState sont au même niveau, les transitions sont fluides sans re-mount, et le debugging est simplifié. Seuls trois composants sont extraits car vraiment réutilisables : AudioSettings, ConnectionStatus et Toast. C'est un trade-off assumé pour le MVP."
+> "Notre frontend utilise une architecture monolithique **intentionnelle**. Le fichier NewFrontTest.jsx contient tous les écrans en composants inline, soit environ 3000 lignes incluant les nouveaux modes Free Canvas et Infinite. Pourquoi ce choix ? Dans un jeu avec de nombreuses transitions d'état - accueil, sélection mode, lobby, jeu, résultats - partager l'état entre composants séparés nécessiterait Context API ou Redux. Avec un monolithe, tous les useState sont au même niveau, les transitions sont fluides sans re-mount, et le debugging est simplifié. Seuls trois composants sont extraits car vraiment réutilisables : AudioSettings, ConnectionStatus et Toast. C'est un trade-off assumé pour le MVP."
 
 ### 📚 Informations de fond
 - **Fichier principal :** NewFrontTest.jsx
@@ -694,7 +699,7 @@ COMPOSANTS EXTRAITS (réutilisables)
 - **Services :** services
 
 ### ❓ Questions potentielles
-1. **"2500 lignes, n'est-ce pas une mauvaise pratique ?"**
+1. **"3000 lignes, n'est-ce pas une mauvaise pratique ?"**
    - Trade-off conscient : simplicité état vs modularité ; adapté au MVP
 2. **"Comment maintenez-vous ce fichier ?"**
    - Sections bien délimitées par commentaires, IDE avec code folding
@@ -718,12 +723,12 @@ ARCHITECTURE BACKEND : FASTAPI
 STRUCTURE
 ─────────
 backend/
-├── main.py              → App FastAPI + endpoints core (5)
+├── main.py              → App FastAPI + endpoints core (5) + Active Learning (3)
 ├── routers/
 │   ├── admin.py         → Endpoints admin (6)
 │   └── games.py         → Endpoints multiplayer (24)
 ├── services/
-│   ├── firestore_service.py  → Accès Firestore
+│   ├── firestore_service.py  → Accès Firestore + Active Learning
 │   ├── presence_service.py   → Gestion présence RTDB
 │   └── storage_service.py    → Firebase Storage
 ├── models/              → Fichiers .h5 et metadata
@@ -740,17 +745,18 @@ async def load_model():
 
 Avantage : Inférence 12-18ms (vs 2000ms si chargé par requête)
 
-34 ENDPOINTS ORGANISÉS
+38 ENDPOINTS ORGANISÉS
 ━━━━━━━━━━━━━━━━━━━━━━
-┌───────────────┬───────┬───────────────────────────────┐
-│ Groupe        │ Count │ Exemples                      │
-├───────────────┼───────┼───────────────────────────────┤
-│ Core          │ 5     │ /predict, /health, /categories│
-│ Admin         │ 6     │ /admin/retrain, /admin/cleanup│
-│ Race Mode     │ 8     │ /games/race/create, /join     │
-│ Guessing Mode │ 11    │ /games/guessing/*, /chat      │
-│ Presence      │ 5     │ /games/presence/heartbeat     │
-└───────────────┴───────┴───────────────────────────────┘
+┌─────────────────┬───────┬───────────────────────────────┐
+│ Groupe          │ Count │ Exemples                      │
+├─────────────────┼───────┼───────────────────────────────┤
+│ Core            │ 5     │ /predict, /health, /categories│
+│ Active Learning │ 3     │ /drawings/save, /categories/weak│
+│ Admin           │ 6     │ /admin/retrain, /admin/cleanup│
+│ Race Mode       │ 8     │ /games/race/create, /join     │
+│ Guessing Mode   │ 11    │ /games/guessing/*, /chat      │
+│ Presence        │ 5     │ /games/presence/heartbeat     │
+└─────────────────┴───────┴───────────────────────────────┘
 
 JUSTIFICATION FASTAPI
 ━━━━━━━━━━━━━━━━━━━━━
@@ -760,7 +766,7 @@ JUSTIFICATION FASTAPI
 ```
 
 ### 🎤 Script présentateur
-> "Le backend est structuré avec FastAPI. Le fichier main.py contient l'app et les 5 endpoints core. Les routers séparent la logique : admin pour les opérations de maintenance, games pour le multiplayer. Les services encapsulent l'accès aux données Firebase. Point crucial : le modèle TensorFlow est chargé au startup de l'application, pas à chaque requête. Cela garantit une inférence en 12-18ms au lieu de 2 secondes. Les 34 endpoints sont documentés automatiquement par FastAPI - visitez /docs pour le Swagger interactif."
+> "Le backend est structuré avec FastAPI. Le fichier main.py contient l'app et les endpoints core plus les endpoints Active Learning. Les routers séparent la logique : admin pour les opérations de maintenance, games pour le multiplayer. Les services encapsulent l'accès aux données Firebase, notamment pour la collecte de dessins via Active Learning. Point crucial : le modèle TensorFlow est chargé au startup de l'application, pas à chaque requête. Cela garantit une inférence en 12-18ms au lieu de 2 secondes. Les 38 endpoints sont documentés automatiquement par FastAPI - visitez /docs pour le Swagger interactif."
 
 ### 📚 Informations de fond
 - **main.py :** main.py
@@ -1306,24 +1312,35 @@ STATE MACHINE : FLOW DU JEU
   │ • Health │              │ • Classic   │             │ • Create    │
   │   check  │              │ • Race      │             │ • Join      │
   │ • Logo   │              │ • Team      │             │ • Waiting   │
-  └──────────┘              └─────────────┘             └──────┬──────┘
-                                   ↑                           │
-                                   │  new game       all ready │
-                                   │                           ▼
-                           ┌──────────────┐            ┌───────────────┐
-                           │  GAME_OVER   │            │   PLAYING     │
-                           │              │     end    │               │
-                           │ • Scores     │ ◄───────── │ • Canvas      │
-                           │ • Winner     │            │ • Timer       │
-                           │ • Play again │            │ • Predictions │
-                           └──────────────┘            └───────────────┘
+  └──────────┘              │ • Free      │             └──────┬──────┘
+                            │ • Infinite  │                    │
+                            └─────┬───────┘          all ready │
+                                  │                            ▼
+                           ┌──────┴──────┐             ┌───────────────┐
+                           │             │             │   PLAYING     │
+                 ┌─────────┼─────────────┼─────────────│               │
+                 │         │             │      end    │ • Canvas      │
+                 ▼         ▼             ▼             │ • Timer       │
+          ┌───────────┐ ┌────────┐ ┌──────────────┐   │ • Predictions │
+          │FREE_CANVAS│ │INFINITE│ │  GAME_OVER   │◄──└───────────────┘
+          │           │ │        │ │              │
+          │ • Test    │ │ • Sans │ │ • Scores     │
+          │   libre   │ │   fin  │ │ • Winner     │
+          │ • Save    │ │ • Auto │ │ • Play again │
+          └───────────┘ │   save │ └──────────────┘
+                        └────────┘         ↑
+                                           │ new game
+                                           ↓
+                                    MODE_SELECT
 
 
 MODES DE JEU (gameMode)
 ───────────────────────
-• CLASSIC → Boucle PLAYING seulement (pas de LOBBY)
-• RACE    → Compétition, tous dessinent simultanément
-• TEAM    → Coopératif, 1 drawer + guessers vs IA
+• CLASSIC     → Boucle PLAYING seulement (pas de LOBBY)
+• RACE        → Compétition, tous dessinent simultanément
+• TEAM        → Coopératif, 1 drawer + guessers vs IA
+• FREE_CANVAS → Test libre (contribue à l'Active Learning)
+• INFINITE    → Mode sans fin (auto-save + catégories intelligentes)
 
 TRANSITIONS CRITIQUES
 ─────────────────────
@@ -1331,10 +1348,11 @@ LOBBY_FLOW → PLAYING : Quand tous les joueurs sont "ready"
 PLAYING → PLAYING    : Nouveau round (même partie)
 PLAYING → GAME_OVER  : Dernier round terminé ou timeout
 GAME_OVER → WELCOME  : Bouton "New Game"
+FREE_CANVAS/INFINITE → MODE_SELECT : Bouton "Quitter"
 ```
 
 ### 🎤 Script présentateur
-> "Voici la state machine qui orchestre le jeu. Cinq états principaux : WELCOME pour l'accueil avec health check backend, MODE_SELECT pour choisir entre Classic, Race ou Team, LOBBY_FLOW pour la création/jonction de partie et l'attente des joueurs, PLAYING pour le jeu actif, et GAME_OVER pour les résultats. Les transitions sont déclenchées par des actions utilisateur ou des événements : tous les joueurs ready déclenche le passage au jeu, la fin du dernier round déclenche Game Over. En mode Classic, on saute directement de MODE_SELECT à PLAYING sans passer par le lobby."
+> "Voici la state machine qui orchestre le jeu. Sept états principaux : WELCOME pour l'accueil avec health check backend, MODE_SELECT pour choisir entre les 5 modes de jeu, LOBBY_FLOW pour la création/jonction de partie et l'attente des joueurs, PLAYING pour le jeu actif, FREE_CANVAS pour le test libre, INFINITE pour le mode sans fin, et GAME_OVER pour les résultats. Les transitions sont déclenchées par des actions utilisateur ou des événements : tous les joueurs ready déclenche le passage au jeu, la fin du dernier round déclenche Game Over. En mode Classic, on saute directement de MODE_SELECT à PLAYING sans passer par le lobby. Les modes Free Canvas et Infinite sont des modes standalone qui contribuent à l'Active Learning."
 
 ### 📚 Informations de fond
 - **Implémentation :** Variable `gameState` dans NewFrontTest.jsx
@@ -1356,7 +1374,7 @@ GAME_OVER → WELCOME  : Bouton "New Game"
 ### 🎨 Visuel
 - QR Code grand format
 - Récapitulatif visuel du parcours (ML → Cloud → App)
-- Screenshots des 3 modes
+- Screenshots des 5 modes
 
 ### 📝 Texte
 ```
@@ -1376,7 +1394,8 @@ RÉCAPITULATIF DU PARCOURS
 🧠 CNN              → 3 Conv + Dense 128, 90.2% accuracy, 12-18ms
 ☁️ CLOUD            → Firebase + Cloud Run, ~$0/mois
 🌐 RÉSEAU           → REST + WebSocket + gRPC selon le besoin
-🎮 APPLICATION      → 3 modes, 34 endpoints, state machine claire
+🎮 APPLICATION      → 5 modes, 38 endpoints, state machine claire
+🔄 ACTIVE LEARNING  → Free Canvas + Infinite alimentent le pipeline ML
 
 TOUS LES CHOIX JUSTIFIÉS
 ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1390,6 +1409,7 @@ TOUS LES CHOIX JUSTIFIÉS
 ✓ REST (Cloud Run)    → CRUD parties et prédictions
 ✓ gRPC (Firestore)    → Backend-to-backend performant
 ✓ Monolithe frontend  → État partagé, dev rapide
+✓ Active Learning     → Amélioration continue du modèle
 
 CE QUE NOUS AVONS DÉMONTRÉ
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1397,13 +1417,14 @@ CE QUE NOUS AVONS DÉMONTRÉ
 2. Architecture cloud moderne et scalable
 3. Communications optimisées par cas d'usage
 4. Application interactive temps réel
-5. Choix techniques défendables et justifiés
+5. Active Learning pour amélioration continue
+6. Choix techniques défendables et justifiés
 
 MERCI ! QUESTIONS ?
 ```
 
 ### 🎤 Script présentateur
-> "Je vous invite à tester l'application en scannant ce QR code. Récapitulons notre parcours : nous avons reconstitué le dataset Quick Draw avec notre optimisation centroid crop, entraîné un CNN à 90.2% d'accuracy avec inférence en 12-18ms, déployé sur une architecture cloud Firebase + Cloud Run pour environ 0 dollar par mois, et développé une application avec 3 modes de jeu et audio synthétique. Chaque choix technique a été justifié : raster pour simplifier le CNN, centroid crop pour normaliser les dessins, Cloud Run pour Docker et scale-to-zero, dual-database pour temps réel et persistance. Nous avons démontré un pipeline ML complet, de la donnée brute à l'application interactive. Merci de votre attention, je suis prêt pour vos questions !"
+> "Je vous invite à tester l'application en scannant ce QR code. Récapitulons notre parcours : nous avons reconstitué le dataset Quick Draw avec notre optimisation centroid crop, entraîné un CNN à 90.2% d'accuracy avec inférence en 12-18ms, déployé sur une architecture cloud Firebase + Cloud Run pour environ 0 dollar par mois, et développé une application avec 5 modes de jeu incluant un système d'Active Learning. Les modes Free Canvas et Infinite permettent aux utilisateurs de contribuer à l'amélioration du modèle. Chaque choix technique a été justifié : raster pour simplifier le CNN, centroid crop pour normaliser les dessins, Cloud Run pour Docker et scale-to-zero, dual-database pour temps réel et persistance. Nous avons démontré un pipeline ML complet, de la donnée brute à l'application interactive avec amélioration continue. Merci de votre attention, je suis prêt pour vos questions !"
 
 ### 📚 Informations de fond
 - **URL production :** https://ai-pictionary-4f8f2.web.app
@@ -1416,7 +1437,7 @@ MERCI ! QUESTIONS ?
 2. **"Que feriez-vous différemment ?"**
    - Architecture frontend modulaire dès le départ, TensorFlow.js pour inférence client
 3. **"Prochaines étapes ?"**
-   - Active Learning UI, refactoring frontend, leaderboard persistant, version mobile
+   - Monitoring Active Learning, refactoring frontend, leaderboard persistant, version mobile
 
 ---
 

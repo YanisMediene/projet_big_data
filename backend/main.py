@@ -392,6 +392,185 @@ async def save_correction(
     }
 
 
+# ==================== DRAWING SAVE FOR ACTIVE LEARNING ====================
+
+
+class SaveDrawingRequest(BaseModel):
+    image_data: str  # Base64 encoded image
+    target_category: str  # Category the user was drawing
+    ai_prediction: str  # What AI predicted
+    ai_confidence: float  # AI confidence (0-1)
+    game_mode: str  # CLASSIC, INFINITE, FREE_CANVAS, etc.
+    user_id: str = "anonymous"  # Optional user identifier
+
+
+class SaveDrawingResponse(BaseModel):
+    status: str
+    drawing_id: str = None
+    message: str
+
+
+def resize_to_28x28(base64_image: str) -> str:
+    """
+    Resize image to 28x28 (Quick Draw format) for training.
+
+    Args:
+        base64_image: Base64 encoded image
+
+    Returns:
+        Base64 encoded 28x28 grayscale image (inverted colors)
+    """
+    try:
+        # Remove data URL prefix if present
+        if "," in base64_image:
+            base64_image = base64_image.split(",")[1]
+
+        # Decode base64
+        image_bytes = base64.b64decode(base64_image)
+        image = Image.open(BytesIO(image_bytes))
+
+        # Convert to grayscale
+        image = image.convert("L")
+
+        # Resize to 28x28
+        image = image.resize((28, 28), Image.LANCZOS)
+
+        # Invert colors (Canvas: white bg → Dataset: black bg)
+        img_array = np.array(image)
+        img_array = 255 - img_array
+        image = Image.fromarray(img_array.astype(np.uint8))
+
+        # Convert back to base64
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    except Exception as e:
+        print(f"Error resizing image: {e}")
+        return None
+
+
+@app.post("/drawings/save", response_model=SaveDrawingResponse)
+async def save_drawing_for_training(request: SaveDrawingRequest):
+    """
+    Save a user drawing to Firestore for active learning.
+
+    This endpoint stores drawings that can be used to retrain the model.
+    Drawings are stored as 28x28 grayscale images (Quick Draw format).
+
+    **Use cases:**
+    - Classic mode: Save successful/failed drawings
+    - Infinite mode: Continuously collect training data
+    - Free Canvas: Save drawings with user-provided labels
+
+    **No authentication required** to maximize data collection.
+    Rate limiting is applied at middleware level.
+    """
+    from services.firestore_service import FirestoreService
+
+    try:
+        # Resize to 28x28
+        resized_image = resize_to_28x28(request.image_data)
+        if not resized_image:
+            raise HTTPException(status_code=400, detail="Failed to process image")
+
+        # Determine if AI was correct
+        was_correct = (
+            request.ai_prediction.lower() == request.target_category.lower()
+            and request.ai_confidence >= 0.25
+        )
+
+        drawing_doc = {
+            "imageBase64": resized_image,
+            "targetCategory": request.target_category.lower(),
+            "aiPrediction": request.ai_prediction.lower(),
+            "aiConfidence": request.ai_confidence,
+            "wasCorrect": was_correct,
+            "gameMode": request.game_mode,
+            "modelVersion": MODEL_VERSION,
+            "userId": request.user_id,
+        }
+
+        firestore_svc = FirestoreService()
+        doc_id = await firestore_svc.save_user_drawing(drawing_doc)
+
+        return SaveDrawingResponse(
+            status="success",
+            drawing_id=doc_id,
+            message=f"Drawing saved for training (category: {request.target_category})",
+        )
+
+    except Exception as e:
+        print(f"Error saving drawing: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save drawing: {str(e)}")
+
+
+@app.get("/drawings/stats")
+async def get_drawing_stats():
+    """
+    Get statistics about collected drawings for training.
+
+    Returns count of new drawings and breakdown by category.
+    Useful for monitoring data collection progress.
+    """
+    from services.firestore_service import FirestoreService
+
+    try:
+        firestore_svc = FirestoreService()
+
+        # Get count of new drawings
+        new_count = await firestore_svc.get_new_drawings_count()
+
+        # Get category stats
+        category_stats = await firestore_svc.get_category_stats_for_training()
+
+        # Get last training info
+        last_training = await firestore_svc.get_last_training_info()
+
+        return {
+            "new_drawings_count": new_count,
+            "min_required_for_training": 500,
+            "ready_for_training": new_count >= 500,
+            "category_stats": category_stats,
+            "last_training": last_training,
+            "model_version": MODEL_VERSION,
+        }
+
+    except Exception as e:
+        print(f"Error getting drawing stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/categories/weak")
+async def get_weak_categories():
+    """
+    Get categories where the model performs poorly.
+
+    Returns categories sorted by average AI confidence (lowest first).
+    Useful for Infinite mode to prioritize challenging categories.
+    """
+    from services.firestore_service import FirestoreService
+
+    try:
+        firestore_svc = FirestoreService()
+        category_stats = await firestore_svc.get_category_stats_for_training()
+
+        # Sort by average confidence (lowest first)
+        weak_categories = sorted(
+            [{"category": cat, **stats} for cat, stats in category_stats.items()],
+            key=lambda x: x.get("avgConfidence", 1.0),
+        )
+
+        return {
+            "weak_categories": weak_categories[:20],  # Top 20 weakest
+            "total_categories": len(CATEGORIES),
+        }
+
+    except Exception as e:
+        print(f"Error getting weak categories: {e}")
+        return {"weak_categories": [], "total_categories": len(CATEGORIES)}
+
+
 if __name__ == "__main__":
     import uvicorn
 

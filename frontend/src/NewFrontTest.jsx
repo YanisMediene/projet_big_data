@@ -14,6 +14,7 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:800
 const TOTAL_ROUNDS_CLASSIC = 6;
 const TOTAL_ROUNDS_RACE = 6;
 const ROUND_TIME = 20;
+const INFINITE_SUCCESS_THRESHOLD = 0.85; // Seuil de confiance pour auto-save en mode INFINITE
 
 const WRONG_GUESSES = [
   "un truc", "aucune idée", "c'est quoi ça ?", "un ovni", 
@@ -29,13 +30,19 @@ const INITIAL_MOCK_PLAYERS = [
 
 // --- MAIN COMPONENT ---
 export default function QuickDrawApp() {
-  const [gameState, setGameState] = useState('WELCOME'); // WELCOME, MODE_SELECT, LOBBY_FLOW, PLAYING, GAME_OVER
-  const [gameMode, setGameMode] = useState('CLASSIC'); // CLASSIC, RACE, TEAM
+  const [gameState, setGameState] = useState('WELCOME'); // WELCOME, MODE_SELECT, LOBBY_FLOW, PLAYING, GAME_OVER, FREE_CANVAS, INFINITE
+  const [gameMode, setGameMode] = useState('CLASSIC'); // CLASSIC, RACE, TEAM, FREE_CANVAS, INFINITE
   const [round, setRound] = useState(1);
   const [currentWord, setCurrentWord] = useState('');
   const [previousWord, setPreviousWord] = useState(''); // Pour éviter les répétitions
   const [drawings, setDrawings] = useState([]); 
   const [players, setPlayers] = useState([]);
+  
+  // Infinite mode stats
+  const [infiniteSuccessCount, setInfiniteSuccessCount] = useState(0);
+  const [infiniteTotalCount, setInfiniteTotalCount] = useState(0);
+  const [weakCategories, setWeakCategories] = useState([]); // Catégories avec faible confiance AI
+  const [categoryHistory, setCategoryHistory] = useState([]); // Historique pour éviter répétitions
   
   // Multiplayer state
   const [roomCode, setRoomCode] = useState('');
@@ -79,6 +86,20 @@ export default function QuickDrawApp() {
     loadCategories();
   }, []);
 
+  // Charger les catégories faibles pour le mode INFINITE
+  const loadWeakCategories = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/categories/weak`);
+      if (response.ok) {
+        const data = await response.json();
+        setWeakCategories(data.weak_categories || []);
+        console.log('📊 Loaded weak categories:', data.weak_categories?.length);
+      }
+    } catch (error) {
+      console.error('Failed to load weak categories:', error);
+    }
+  };
+
   // Start sequence: Welcome -> Mode Select
   const goToModeSelect = () => {
     setGameState('MODE_SELECT');
@@ -97,6 +118,75 @@ export default function QuickDrawApp() {
     setGameData(null);
     setGameState('PLAYING');
     prepareRound(1);
+  };
+
+  // Mode Select -> Free Canvas Mode
+  const startFreeCanvasMode = () => {
+    setGameMode('FREE_CANVAS');
+    setDrawings([]);
+    setGameState('FREE_CANVAS');
+  };
+
+  // Mode Select -> Infinite Mode
+  const startInfiniteMode = async () => {
+    setGameMode('INFINITE');
+    setRound(1);
+    setDrawings([]);
+    setInfiniteSuccessCount(0);
+    setInfiniteTotalCount(0);
+    setCategoryHistory([]);
+    setPreviousWord('');
+    setGameState('INFINITE');
+    
+    // Charger les catégories faibles
+    await loadWeakCategories();
+    
+    // Préparer le premier round avec sélection intelligente
+    prepareInfiniteRound();
+  };
+
+  // Sélection intelligente de catégorie pour le mode INFINITE
+  const selectInfiniteCategory = () => {
+    if (!categoriesLoaded || wordsToDrawFr.length === 0) return null;
+    
+    // Éviter les 3 dernières catégories
+    const recentCategories = categoryHistory.slice(-3);
+    
+    // Prioriser les catégories faibles (70% de chance)
+    let candidatePool = [...wordsToDrawFr];
+    
+    if (weakCategories.length > 0 && Math.random() < 0.7) {
+      // Filtrer les catégories faibles qui ne sont pas récentes
+      const weakFr = weakCategories
+        .map(cat => CATEGORY_MAP[cat.category] || cat.category)
+        .filter(cat => !recentCategories.includes(cat));
+      
+      if (weakFr.length > 0) {
+        candidatePool = weakFr;
+      }
+    }
+    
+    // Filtrer les catégories récentes
+    candidatePool = candidatePool.filter(cat => !recentCategories.includes(cat));
+    
+    // Si toutes sont récentes, utiliser toutes les catégories
+    if (candidatePool.length === 0) {
+      candidatePool = wordsToDrawFr.filter(cat => cat !== previousWord);
+    }
+    
+    // Choisir aléatoirement
+    const selected = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+    return selected;
+  };
+
+  // Préparer un round en mode INFINITE
+  const prepareInfiniteRound = () => {
+    const word = selectInfiniteCategory();
+    if (word) {
+      setCurrentWord(word);
+      setPreviousWord(word);
+      setCategoryHistory(prev => [...prev, word]);
+    }
   };
 
   // Mode Select -> Lobby Flow (Race/Team)
@@ -381,6 +471,8 @@ export default function QuickDrawApp() {
           onSelectClassic={startClassicGame}
           onSelectRace={() => startMultiplayerGame('RACE')}
           onSelectTeam={() => startMultiplayerGame('TEAM')}
+          onSelectFreeCanvas={startFreeCanvasMode}
+          onSelectInfinite={startInfiniteMode}
         />
       )}
 
@@ -451,6 +543,39 @@ export default function QuickDrawApp() {
           players={players}
           aiScore={globalAiScore}
           onRestart={goToModeSelect}
+        />
+      )}
+
+      {/* FREE CANVAS MODE */}
+      {gameState === 'FREE_CANVAS' && (
+        <FreeCanvasScreen
+          onQuit={goToModeSelect}
+        />
+      )}
+
+      {/* INFINITE MODE */}
+      {gameState === 'INFINITE' && (
+        <InfiniteGameScreen
+          word={currentWord}
+          round={round}
+          successCount={infiniteSuccessCount}
+          totalCount={infiniteTotalCount}
+          onSuccess={(imageData, confidence) => {
+            setInfiniteSuccessCount(prev => prev + 1);
+            setInfiniteTotalCount(prev => prev + 1);
+            setDrawings(prev => [...prev, { word: currentWord, imageData, success: true }]);
+            setRound(prev => prev + 1);
+            prepareInfiniteRound();
+          }}
+          onSkip={(imageData) => {
+            setInfiniteTotalCount(prev => prev + 1);
+            setDrawings(prev => [...prev, { word: currentWord, imageData, success: false }]);
+            setRound(prev => prev + 1);
+            prepareInfiniteRound();
+          }}
+          onQuit={() => {
+            setGameState('GAME_OVER');
+          }}
         />
       )}
 
@@ -570,7 +695,7 @@ function WelcomeScreen({ onStart }) {
 }
 
 // New Component: Game Mode Selection Curtain
-function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
+function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam, onSelectFreeCanvas, onSelectInfinite }) {
   const [renderState, setRenderState] = useState('hidden');
 
   useEffect(() => {
@@ -590,10 +715,11 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
       className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#ECECEC] transition-transform duration-500 ease-in-out ${getTransformClass()}`}
       style={{ willChange: 'transform' }}
     >
-      <div className="bg-white p-8 md:p-12 rounded-sm border-4 border-black text-center shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-4xl w-full mx-4">
+      <div className="bg-white p-8 md:p-12 rounded-sm border-4 border-black text-center shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-5xl w-full mx-4">
         <h2 className="text-4xl md:text-5xl font-bold mb-8 text-blue-600">Choisissez un mode</h2>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Première ligne : modes de jeu */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           {/* Classic Mode */}
           <button 
             onClick={() => {
@@ -638,6 +764,46 @@ function GameModeSelection({ onSelectClassic, onSelectRace, onSelectTeam }) {
             <h3 className="text-2xl font-bold mb-2">Team vs IA</h3>
             <p className="text-gray-500 text-sm">Coop. Dessinez ensemble pour battre l'IA.</p>
           </button>
+        </div>
+
+        {/* Deuxième ligne : modes spéciaux */}
+        <div className="border-t-2 border-gray-200 pt-6">
+          <p className="text-gray-400 text-sm mb-4 font-bold">MODES SPÉCIAUX - Aidez à améliorer l'IA !</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+            {/* Free Canvas Mode */}
+            <button 
+              onClick={() => {
+                audioService.playButtonClick();
+                onSelectFreeCanvas();
+              }}
+              className="group flex flex-col items-center p-6 border-4 border-green-500 rounded-sm hover:bg-green-50 transition-colors btn-shadow bg-white"
+            >
+              <div className="bg-green-500 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold mb-2 text-green-700">Canvas Libre</h3>
+              <p className="text-gray-500 text-sm">Dessinez ce que vous voulez et voyez les prédictions de l'IA en temps réel.</p>
+            </button>
+
+            {/* Infinite Mode */}
+            <button 
+              onClick={() => {
+                audioService.playButtonClick();
+                onSelectInfinite();
+              }}
+              className="group flex flex-col items-center p-6 border-4 border-purple-500 rounded-sm hover:bg-purple-50 transition-colors btn-shadow bg-white"
+            >
+              <div className="bg-purple-500 p-4 rounded-full border-2 border-black mb-4 group-hover:scale-110 transition-transform">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold mb-2 text-purple-700">Mode Infini</h3>
+              <p className="text-gray-500 text-sm">Sans limite de temps ni de manches. Dessinez autant que vous voulez !</p>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2330,6 +2496,810 @@ function DrawingScreen({
   );
 }
 
+// ========================================
+// FREE CANVAS MODE - Dessin libre avec prédictions en temps réel
+// ========================================
+function FreeCanvasScreen({ onQuit }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasStartedDrawing, setHasStartedDrawing] = useState(false);
+  const [predictions, setPredictions] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const predictionTimerRef = useRef(null);
+  const isPredictingRef = useRef(false);
+
+  // Fonction pour obtenir les coordonnées
+  const getCoordinates = (event) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+    const clientY = event.clientY || (event.touches && event.touches[0].clientY);
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  };
+
+  // Bounding box du dessin
+  const getBoundingBox = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+    let hasDrawing = false;
+
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const index = (y * canvas.width + x) * 4;
+        if (data[index] < 250 || data[index + 1] < 250 || data[index + 2] < 250) {
+          hasDrawing = true;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+
+    if (!hasDrawing) return null;
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const padding = Math.max(width, height) * 0.05;
+    return {
+      x: Math.max(0, minX - padding),
+      y: Math.max(0, minY - padding),
+      width: Math.min(canvas.width - minX, width + padding * 2),
+      height: Math.min(canvas.height - minY, height + padding * 2)
+    };
+  };
+
+  // Créer image 128x128 pour le modèle
+  const createModelImage = () => {
+    const canvas = canvasRef.current;
+    const bbox = getBoundingBox();
+    if (!bbox) return null;
+
+    const targetSize = 128;
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = targetSize;
+    tempCanvas.height = targetSize;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    tempCtx.fillStyle = '#FFFFFF';
+    tempCtx.fillRect(0, 0, targetSize, targetSize);
+
+    const scale = Math.min(targetSize / bbox.width, targetSize / bbox.height) * 0.95;
+    const scaledWidth = bbox.width * scale;
+    const scaledHeight = bbox.height * scale;
+    const offsetX = (targetSize - scaledWidth) / 2;
+    const offsetY = (targetSize - scaledHeight) / 2;
+
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+    tempCtx.drawImage(canvas, bbox.x, bbox.y, bbox.width, bbox.height, offsetX, offsetY, scaledWidth, scaledHeight);
+
+    return tempCanvas.toDataURL('image/png');
+  };
+
+  // Faire une prédiction
+  const makePrediction = async () => {
+    if (!canvasRef.current || isPredictingRef.current) return;
+    
+    try {
+      isPredictingRef.current = true;
+      const base64Image = createModelImage();
+      if (!base64Image) {
+        isPredictingRef.current = false;
+        return;
+      }
+
+      const result = await predictDrawing(base64Image);
+      const predArray = Object.entries(result.probabilities)
+        .map(([category, confidence]) => ({
+          category,
+          categoryFr: CATEGORY_MAP[category] || category,
+          confidence
+        }))
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 5); // Top 5 pour le mode libre
+
+      setPredictions(predArray);
+    } catch (error) {
+      console.error('Erreur prédiction:', error);
+    } finally {
+      isPredictingRef.current = false;
+    }
+  };
+
+  // Handlers dessin
+  const startDraw = (e) => {
+    e.preventDefault();
+    const { x, y } = getCoordinates(e);
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+    setHasStartedDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext('2d');
+    const currentPos = getCoordinates(e);
+    ctx.lineTo(currentPos.x, currentPos.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(currentPos.x, currentPos.y);
+
+    if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+    predictionTimerRef.current = setTimeout(makePrediction, 300);
+  };
+
+  const stopDraw = () => {
+    setIsDrawing(false);
+    if (hasStartedDrawing) {
+      setTimeout(makePrediction, 100);
+    }
+  };
+
+  const clearCanvas = () => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    setHasStartedDrawing(false);
+    setPredictions([]);
+    setSaveSuccess(false);
+    audioService.play('clearCanvas');
+  };
+
+  // Sauvegarder le dessin pour l'entraînement
+  const saveDrawingForTraining = async (category) => {
+    if (!canvasRef.current || isSaving) return;
+    
+    setIsSaving(true);
+    try {
+      const imageData = createModelImage();
+      if (!imageData) {
+        alert('Veuillez dessiner quelque chose d\'abord');
+        return;
+      }
+
+      const categoryEn = FRENCH_TO_ENGLISH[category] || category;
+      const topPrediction = predictions[0] || { category: 'unknown', confidence: 0 };
+
+      const response = await fetch(`${API_BASE_URL}/drawings/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_data: imageData,
+          target_category: categoryEn,
+          ai_prediction: topPrediction.category,
+          ai_confidence: topPrediction.confidence,
+          game_mode: 'free_canvas'
+        })
+      });
+
+      if (response.ok) {
+        setSaveSuccess(true);
+        audioService.play('roundSuccess');
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        throw new Error('Erreur sauvegarde');
+      }
+    } catch (error) {
+      console.error('Erreur sauvegarde:', error);
+      alert('Erreur lors de la sauvegarde');
+    } finally {
+      setIsSaving(false);
+      setShowCategoryModal(false);
+    }
+  };
+
+  // Init canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const handleResize = () => {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      ctx.putImageData(imageData, 0, 0);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Liste des catégories pour la modal
+  const allCategories = Object.values(CATEGORY_MAP).sort();
+
+  return (
+    <div className="flex h-screen bg-white overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Header */}
+        <div className="flex justify-between items-center px-4 py-3 bg-green-500 z-10 shrink-0 border-b-2 border-green-600">
+          <div className="text-xl text-white font-bold flex items-center gap-2">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+            Canvas Libre - Dessinez ce que vous voulez !
+          </div>
+        </div>
+
+        {/* Canvas */}
+        <div className="flex-1 relative bg-white cursor-crosshair">
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 touch-none"
+            onMouseDown={startDraw}
+            onMouseMove={draw}
+            onMouseUp={stopDraw}
+            onMouseLeave={stopDraw}
+            onTouchStart={startDraw}
+            onTouchMove={draw}
+            onTouchEnd={stopDraw}
+          />
+
+          {/* Prédictions flottantes */}
+          {predictions.length > 0 && (
+            <div className="absolute top-4 right-4 bg-white/95 border-2 border-gray-200 rounded-lg shadow-lg p-4 max-w-xs">
+              <h3 className="font-bold text-gray-700 mb-2 text-sm">L'IA voit :</h3>
+              <div className="space-y-2">
+                {predictions.map((pred, idx) => {
+                  const confidence = Math.round(pred.confidence * 100);
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            idx === 0 ? 'bg-green-500' : 'bg-blue-400'
+                          }`}
+                          style={{ width: `${confidence}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-medium w-28 truncate">{pred.categoryFr}</span>
+                      <span className="text-sm font-bold w-12 text-right">{confidence}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Message succès */}
+          {saveSuccess && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg animate-bounce">
+              ✓ Dessin sauvegardé pour l'entraînement !
+            </div>
+          )}
+        </div>
+
+        {/* Footer Controls */}
+        <div className="bg-[#ECECEC] px-4 py-2 flex justify-between items-center border-t border-gray-200 shrink-0 z-20 relative">
+          <button 
+            onClick={() => {
+              audioService.playButtonClick();
+              clearCanvas();
+            }}
+            className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group"
+            title="Effacer"
+          >
+            <Trash2 size={24} className="text-gray-600 group-hover:text-black" />
+            <span className="text-xs font-bold text-gray-500 group-hover:text-black">Effacer</span>
+          </button>
+          
+          <button 
+            onClick={() => setShowCategoryModal(true)}
+            disabled={!hasStartedDrawing || isSaving}
+            className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold transition-colors ${
+              hasStartedDrawing && !isSaving
+                ? 'bg-green-500 text-white hover:bg-green-400 btn-shadow border-2 border-black'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            {isSaving ? (
+              <Loader2 className="animate-spin" size={20} />
+            ) : (
+              <Plus size={20} />
+            )}
+            Sauvegarder
+          </button>
+
+          <button 
+            onClick={() => {
+              audioService.playButtonClick();
+              onQuit();
+            }}
+            className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group" 
+            title="Quitter"
+          >
+            <X size={24} className="text-gray-600 group-hover:text-red-500" />
+            <span className="text-xs font-bold text-gray-500 group-hover:text-red-500">Quitter</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Modal sélection catégorie */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white border-4 border-black rounded-sm shadow-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-xl font-bold">Qu'avez-vous dessiné ?</h3>
+              <button onClick={() => setShowCategoryModal(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={24} />
+              </button>
+            </div>
+            
+            {/* Quick picks basé sur les prédictions */}
+            {predictions.length > 0 && (
+              <div className="p-4 bg-gray-50 border-b border-gray-200">
+                <p className="text-sm text-gray-500 mb-2">Suggestions de l'IA :</p>
+                <div className="flex flex-wrap gap-2">
+                  {predictions.slice(0, 3).map((pred, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => saveDrawingForTraining(pred.categoryFr)}
+                      className="px-4 py-2 bg-green-100 text-green-800 rounded-full font-bold hover:bg-green-200 transition-colors border border-green-300"
+                    >
+                      {pred.categoryFr} ({Math.round(pred.confidence * 100)}%)
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Liste complète des catégories */}
+            <div className="p-4 overflow-y-auto max-h-[50vh]">
+              <p className="text-sm text-gray-500 mb-2">Ou choisissez dans la liste :</p>
+              <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                {allCategories.map((cat, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => saveDrawingForTraining(cat)}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded font-medium hover:bg-blue-100 hover:text-blue-800 transition-colors text-sm truncate"
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ========================================
+// INFINITE MODE - Dessins sans limite avec auto-save
+// ========================================
+function InfiniteGameScreen({ word, round, successCount, totalCount, onSuccess, onSkip, onQuit }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasStartedDrawing, setHasStartedDrawing] = useState(false);
+  const [predictions, setPredictions] = useState([]);
+  const [aiText, setAiText] = useState("Je ne vois rien pour l'instant...");
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
+  const predictionTimerRef = useRef(null);
+  const isPredictingRef = useRef(false);
+  const autoSavedRef = useRef(false);
+  const currentWordRef = useRef(word);
+
+  // Reset quand le mot change
+  useEffect(() => {
+    currentWordRef.current = word;
+    autoSavedRef.current = false;
+    setAutoSaved(false);
+    setHasStartedDrawing(false);
+    setPredictions([]);
+    setAiText("Je ne vois rien pour l'instant...");
+    setShowConfetti(false);
+    clearCanvas();
+  }, [word]);
+
+  // Fonctions canvas (similaires à DrawingScreen)
+  const getCoordinates = (event) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+    const clientY = event.clientY || (event.touches && event.touches[0].clientY);
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  };
+
+  const getBoundingBox = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+    let hasDrawing = false;
+
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const index = (y * canvas.width + x) * 4;
+        if (data[index] < 250 || data[index + 1] < 250 || data[index + 2] < 250) {
+          hasDrawing = true;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+
+    if (!hasDrawing) return null;
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const padding = Math.max(width, height) * 0.05;
+    return {
+      x: Math.max(0, minX - padding),
+      y: Math.max(0, minY - padding),
+      width: Math.min(canvas.width - minX, width + padding * 2),
+      height: Math.min(canvas.height - minY, height + padding * 2)
+    };
+  };
+
+  const createModelImage = () => {
+    const canvas = canvasRef.current;
+    const bbox = getBoundingBox();
+    if (!bbox) return null;
+
+    const targetSize = 128;
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = targetSize;
+    tempCanvas.height = targetSize;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    tempCtx.fillStyle = '#FFFFFF';
+    tempCtx.fillRect(0, 0, targetSize, targetSize);
+
+    const scale = Math.min(targetSize / bbox.width, targetSize / bbox.height) * 0.95;
+    const scaledWidth = bbox.width * scale;
+    const scaledHeight = bbox.height * scale;
+    const offsetX = (targetSize - scaledWidth) / 2;
+    const offsetY = (targetSize - scaledHeight) / 2;
+
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+    tempCtx.drawImage(canvas, bbox.x, bbox.y, bbox.width, bbox.height, offsetX, offsetY, scaledWidth, scaledHeight);
+
+    return tempCanvas.toDataURL('image/png');
+  };
+
+  // Prédiction avec auto-save
+  const makePrediction = async () => {
+    if (!canvasRef.current || isPredictingRef.current) return;
+    
+    try {
+      isPredictingRef.current = true;
+      const base64Image = createModelImage();
+      if (!base64Image) {
+        isPredictingRef.current = false;
+        return;
+      }
+
+      const result = await predictDrawing(base64Image);
+      const predArray = Object.entries(result.probabilities)
+        .map(([category, confidence]) => ({
+          category,
+          categoryFr: CATEGORY_MAP[category] || category,
+          confidence
+        }))
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 3);
+
+      setPredictions(predArray);
+
+      if (predArray.length > 0) {
+        const topPrediction = predArray[0];
+        const confidence = Math.round(topPrediction.confidence * 100);
+        setAiText(`Je vois... ${topPrediction.categoryFr} (${confidence}%)`);
+
+        const targetEnglish = FRENCH_TO_ENGLISH[currentWordRef.current];
+        const targetPrediction = predArray.find(pred => pred.category === targetEnglish);
+
+        // Auto-save si confiance >= 85% et pas encore sauvegardé
+        if (targetPrediction && targetPrediction.confidence >= INFINITE_SUCCESS_THRESHOLD && !autoSavedRef.current) {
+          console.log('🎉 Auto-save triggered! Confidence:', targetPrediction.confidence);
+          autoSavedRef.current = true;
+          setAutoSaved(true);
+          setShowConfetti(true);
+          audioService.play('roundSuccess');
+
+          // Sauvegarder pour l'entraînement
+          try {
+            await fetch(`${API_BASE_URL}/drawings/save`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image_data: base64Image,
+                target_category: targetEnglish,
+                ai_prediction: topPrediction.category,
+                ai_confidence: targetPrediction.confidence,
+                game_mode: 'infinite'
+              })
+            });
+          } catch (e) {
+            console.error('Erreur sauvegarde:', e);
+          }
+
+          // Passer au suivant après animation
+          setTimeout(() => {
+            onSuccess(base64Image, targetPrediction.confidence);
+          }, 1500);
+        }
+      }
+    } catch (error) {
+      console.error('Erreur prédiction:', error);
+    } finally {
+      isPredictingRef.current = false;
+    }
+  };
+
+  // Handlers dessin
+  const startDraw = (e) => {
+    if (autoSaved) return;
+    e.preventDefault();
+    const { x, y } = getCoordinates(e);
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+    setHasStartedDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing || autoSaved) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext('2d');
+    const currentPos = getCoordinates(e);
+    ctx.lineTo(currentPos.x, currentPos.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(currentPos.x, currentPos.y);
+
+    if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+    predictionTimerRef.current = setTimeout(makePrediction, 400);
+  };
+
+  const stopDraw = () => {
+    setIsDrawing(false);
+    if (hasStartedDrawing && !autoSaved) {
+      setTimeout(makePrediction, 100);
+    }
+  };
+
+  const clearCanvas = () => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    setHasStartedDrawing(false);
+    setPredictions([]);
+    setAiText("Je ne vois rien pour l'instant...");
+    audioService.play('clearCanvas');
+  };
+
+  const handleSkip = () => {
+    const imageData = createModelImage();
+    onSkip(imageData);
+  };
+
+  // Init canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const handleResize = () => {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      ctx.putImageData(imageData, 0, 0);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const targetEnglish = FRENCH_TO_ENGLISH[word];
+  const isCorrectInTop3 = predictions.some(p => p.category === targetEnglish);
+  const targetConfidence = predictions.find(p => p.category === targetEnglish)?.confidence || 0;
+
+  return (
+    <div className="flex h-screen bg-white overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Header */}
+        <div className="flex justify-between items-center px-4 py-3 bg-purple-500 z-10 shrink-0 border-b-2 border-purple-600">
+          <div className="flex items-center gap-4">
+            <div className="text-white">
+              <span className="text-gray-200">Dessinez : </span>
+              <span className="font-bold text-xl capitalize">{word}</span>
+            </div>
+            <div className="bg-purple-600 px-3 py-1 rounded-full text-white font-bold text-sm">
+              Round #{round}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="bg-white/20 px-4 py-1 rounded-full text-white font-bold">
+              ✓ {successCount} / {totalCount}
+            </div>
+            <button 
+              onClick={onQuit}
+              className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-full text-white font-bold transition-colors"
+            >
+              Terminer
+            </button>
+          </div>
+        </div>
+
+        {/* Canvas */}
+        <div className={`flex-1 relative bg-white ${autoSaved ? 'cursor-default' : 'cursor-crosshair'}`}>
+          <canvas
+            ref={canvasRef}
+            className={`absolute inset-0 touch-none ${autoSaved ? 'pointer-events-none' : ''}`}
+            onMouseDown={startDraw}
+            onMouseMove={draw}
+            onMouseUp={stopDraw}
+            onMouseLeave={stopDraw}
+            onTouchStart={startDraw}
+            onTouchMove={draw}
+            onTouchEnd={stopDraw}
+          />
+
+          {/* Confetti effect */}
+          {showConfetti && (
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="text-6xl animate-bounce">🎉</div>
+              <div className="absolute top-1/4 left-1/4 text-4xl animate-ping">⭐</div>
+              <div className="absolute top-1/3 right-1/4 text-4xl animate-ping delay-100">🌟</div>
+              <div className="absolute bottom-1/3 left-1/3 text-4xl animate-ping delay-200">✨</div>
+            </div>
+          )}
+
+          {/* Auto-save success message */}
+          {autoSaved && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-green-500 text-white px-8 py-4 rounded-lg font-bold text-2xl shadow-lg">
+              ✓ Parfait ! ({Math.round(targetConfidence * 100)}%)
+            </div>
+          )}
+
+          {/* Progress bar vers 85% */}
+          {hasStartedDrawing && isCorrectInTop3 && !autoSaved && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white/95 border-2 border-purple-300 rounded-lg shadow-lg p-3 w-64">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-purple-600 font-bold">{word}</span>
+                <span className="font-bold">{Math.round(targetConfidence * 100)}% / 85%</span>
+              </div>
+              <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    targetConfidence >= 0.85 ? 'bg-green-500' : 'bg-purple-500'
+                  }`}
+                  style={{ width: `${Math.min(100, (targetConfidence / 0.85) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* AI Voice */}
+          <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center gap-2 pointer-events-none px-4">
+            <p className="text-xl bg-white/90 inline-block px-4 py-2 rounded-lg text-gray-800 font-bold shadow-lg border-2 border-gray-200">
+              {aiText}
+            </p>
+            
+            {/* Predictions */}
+            {predictions.length > 0 && (
+              <div className="flex gap-2 flex-wrap justify-center">
+                {predictions.map((pred, idx) => {
+                  const confidence = Math.round(pred.confidence * 100);
+                  const isCorrect = pred.category === targetEnglish;
+                  return (
+                    <div 
+                      key={idx}
+                      className={`px-3 py-1 rounded-full text-sm font-bold transition-all duration-300 ${
+                        isCorrect 
+                          ? 'bg-green-500 text-white border-2 border-green-700 scale-110' 
+                          : 'bg-gray-100 text-gray-600 border border-gray-300'
+                      }`}
+                    >
+                      {pred.categoryFr} {confidence}%
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer Controls */}
+        <div className="bg-[#ECECEC] px-4 py-2 flex justify-between items-center border-t border-gray-200 shrink-0 z-20 relative">
+          <button 
+            onClick={() => {
+              audioService.playButtonClick();
+              clearCanvas();
+            }}
+            disabled={autoSaved}
+            className={`p-2 rounded-full transition-colors flex flex-col items-center gap-1 group ${
+              autoSaved ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-200'
+            }`}
+            title="Effacer"
+          >
+            <Trash2 size={24} className="text-gray-600 group-hover:text-black" />
+            <span className="text-xs font-bold text-gray-500 group-hover:text-black">Effacer</span>
+          </button>
+          
+          <button 
+            onClick={handleSkip}
+            disabled={autoSaved}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-colors ${
+              autoSaved 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+            }`}
+          >
+            <SkipForward size={20} />
+            Passer
+          </button>
+
+          <button 
+            onClick={() => {
+              audioService.playButtonClick();
+              onQuit();
+            }}
+            className="p-2 hover:bg-gray-200 rounded-full transition-colors flex flex-col items-center gap-1 group" 
+            title="Quitter"
+          >
+            <X size={24} className="text-gray-600 group-hover:text-red-500" />
+            <span className="text-xs font-bold text-gray-500 group-hover:text-red-500">Quitter</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore = 0, onRestart }) {
   // Calculate winner message
   const getWinnerMessage = () => {
@@ -2366,6 +3336,27 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore 
         return {
           text: "Égalité parfaite !",
           color: "text-yellow-600"
+        };
+      }
+    } else if (gameMode === 'INFINITE') {
+      const successRate = drawings.length > 0 
+        ? Math.round((drawings.filter(d => d.success).length / drawings.length) * 100) 
+        : 0;
+      
+      if (successRate >= 80) {
+        return {
+          text: "Incroyable ! L'IA vous comprend parfaitement !",
+          color: "text-green-600"
+        };
+      } else if (successRate >= 50) {
+        return {
+          text: "Bien joué ! Vous avez aidé à améliorer l'IA !",
+          color: "text-blue-600"
+        };
+      } else {
+        return {
+          text: "Continuez à pratiquer !",
+          color: "text-purple-600"
         };
       }
     }
@@ -2444,6 +3435,37 @@ function GameOverScreen({ drawings, gameMode = 'CLASSIC', players = [], aiScore 
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Infinite Mode Stats */}
+      {gameMode === 'INFINITE' && drawings.length > 0 && (
+        <div className="w-full max-w-2xl mb-8 bg-white rounded-sm border-4 border-purple-500 shadow-lg p-6">
+          <h2 className="text-2xl font-bold mb-4 flex items-center gap-2 text-purple-600">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Statistiques Mode Infini
+          </h2>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <div className="text-4xl font-bold text-purple-600">{drawings.length}</div>
+              <div className="text-sm text-gray-600">Dessins</div>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg">
+              <div className="text-4xl font-bold text-green-600">{successCount}</div>
+              <div className="text-sm text-gray-600">Réussis</div>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <div className="text-4xl font-bold text-blue-600">
+                {Math.round((successCount / drawings.length) * 100)}%
+              </div>
+              <div className="text-sm text-gray-600">Taux de réussite</div>
+            </div>
+          </div>
+          <p className="text-center text-gray-500 mt-4 text-sm">
+            🤖 Merci ! Vos dessins aideront à améliorer l'IA.
+          </p>
         </div>
       )}
 

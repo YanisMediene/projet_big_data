@@ -11,9 +11,13 @@ from services.firestore_service import FirestoreService
 from services.presence_service import PresenceService, GameCleanupService
 from firebase_admin import firestore
 import random
+import base64
+from io import BytesIO
+from PIL import Image
+import numpy as np
 
 # Import categories from config module (loaded dynamically from model metadata)
-from config import CATEGORIES
+from config import CATEGORIES, MODEL_VERSION
 
 router = APIRouter(prefix="/games", tags=["multiplayer"])
 firestore_service = FirestoreService()
@@ -26,6 +30,97 @@ def generate_room_code():
 
     chars = string.ascii_uppercase + string.digits
     return "".join(random.choice(chars) for _ in range(4))
+
+
+def resize_drawing_to_28x28(base64_image: str) -> str:
+    """
+    Resize a drawing to 28x28 pixels (Quick Draw format) and return as base64.
+
+    Args:
+        base64_image: Base64 encoded image (with or without data URL prefix)
+
+    Returns:
+        Base64 encoded 28x28 grayscale image
+    """
+    try:
+        # Remove data URL prefix if present
+        if "," in base64_image:
+            base64_image = base64_image.split(",")[1]
+
+        # Decode base64
+        image_bytes = base64.b64decode(base64_image)
+        image = Image.open(BytesIO(image_bytes))
+
+        # Convert to grayscale
+        image = image.convert("L")
+
+        # Resize to 28x28 with high quality
+        image = image.resize((28, 28), Image.LANCZOS)
+
+        # Invert colors (Canvas: white bg, black strokes → Dataset: black bg, white strokes)
+        img_array = np.array(image)
+        img_array = 255 - img_array
+        image = Image.fromarray(img_array.astype(np.uint8))
+
+        # Convert back to base64
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    except Exception as e:
+        print(f"Error resizing drawing: {e}")
+        return None
+
+
+async def save_drawing_for_training(
+    drawing_data: str,
+    target_category: str,
+    ai_prediction: str,
+    ai_confidence: float,
+    game_mode: str,
+    user_id: str = None,
+):
+    """
+    Save a drawing to Firestore for active learning.
+
+    Args:
+        drawing_data: Base64 encoded image (will be resized to 28x28)
+        target_category: The category the user was supposed to draw
+        ai_prediction: What the AI predicted
+        ai_confidence: AI confidence score (0-1)
+        game_mode: Game mode (CLASSIC, RACE, TEAM, INFINITE, FREE_CANVAS)
+        user_id: Optional user identifier
+    """
+    try:
+        # Resize to 28x28
+        resized_image = resize_drawing_to_28x28(drawing_data)
+        if not resized_image:
+            print("Failed to resize drawing, skipping save")
+            return None
+
+        # Determine if AI was correct
+        was_correct = (
+            ai_prediction.lower() == target_category.lower() and ai_confidence >= 0.25
+        )
+
+        drawing_doc = {
+            "imageBase64": resized_image,
+            "targetCategory": target_category.lower(),
+            "aiPrediction": ai_prediction.lower(),
+            "aiConfidence": ai_confidence,
+            "wasCorrect": was_correct,
+            "gameMode": game_mode,
+            "modelVersion": MODEL_VERSION,
+            "userId": user_id or "anonymous",
+        }
+
+        doc_id = await firestore_service.save_user_drawing(drawing_doc)
+        print(f"✅ Drawing saved for training: {doc_id} (category: {target_category})")
+        return doc_id
+
+    except Exception as e:
+        print(f"❌ Error saving drawing for training: {e}")
+        return None
 
 
 # ==================== Pydantic Models ====================
@@ -302,6 +397,16 @@ async def submit_race_drawing(request: SubmitDrawingRequest):
         if winner:
             winner["rounds_won"] += 1
             winner["score"] += 100  # Points for winning a round
+
+            # 🎯 Save winning drawing for active learning
+            await save_drawing_for_training(
+                drawing_data=request.drawing_data,
+                target_category=game["current_category"],
+                ai_prediction=request.prediction,
+                ai_confidence=request.confidence,
+                game_mode="RACE",
+                user_id=request.player_id,
+            )
 
             # Record round winner
             round_winners = game.get("round_winners", [])

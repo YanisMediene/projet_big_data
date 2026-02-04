@@ -315,3 +315,183 @@ class FirestoreService:
             games.append(data)
 
         return games
+
+    # ==================== USER DRAWINGS FOR ACTIVE LEARNING ====================
+
+    @staticmethod
+    async def save_user_drawing(drawing_data: Dict) -> str:
+        """
+        Save a user drawing for active learning
+
+        Args:
+            drawing_data: Dictionary containing:
+                - imageBase64: Base64 encoded 28x28 image
+                - targetCategory: The category the user was supposed to draw
+                - aiPrediction: What the AI predicted
+                - aiConfidence: AI confidence score
+                - wasCorrect: Whether the AI was correct
+                - gameMode: Game mode (CLASSIC, RACE, TEAM, INFINITE, FREE_CANVAS)
+                - modelVersion: Current model version
+                - userId: Optional user ID
+
+        Returns:
+            Document ID of the created drawing
+        """
+        doc_ref = get_db().collection("user_drawings").document()
+        doc_ref.set(
+            {
+                **drawing_data,
+                "usedForTraining": False,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return doc_ref.id
+
+    @staticmethod
+    async def get_drawings_for_training(limit: int = 5000) -> List[Dict]:
+        """
+        Fetch user drawings that haven't been used for training yet
+
+        Args:
+            limit: Maximum number of drawings to fetch
+
+        Returns:
+            List of drawing documents
+        """
+        query = (
+            get_db()
+            .collection("user_drawings")
+            .where("usedForTraining", "==", False)
+            .limit(limit)
+            .stream()
+        )
+
+        drawings = []
+        for doc in query:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            drawings.append(data)
+
+        return drawings
+
+    @staticmethod
+    async def get_new_drawings_count() -> int:
+        """
+        Get count of drawings not yet used for training
+
+        Returns:
+            Number of new drawings available
+        """
+        query = (
+            get_db()
+            .collection("user_drawings")
+            .where("usedForTraining", "==", False)
+            .stream()
+        )
+
+        return sum(1 for _ in query)
+
+    @staticmethod
+    async def mark_drawings_as_used(drawing_ids: List[str]) -> int:
+        """
+        Mark drawings as used for training
+
+        Args:
+            drawing_ids: List of drawing document IDs to mark
+
+        Returns:
+            Number of drawings marked
+        """
+        batch = get_db().batch()
+        count = 0
+
+        for drawing_id in drawing_ids:
+            doc_ref = get_db().collection("user_drawings").document(drawing_id)
+            batch.update(doc_ref, {"usedForTraining": True})
+            count += 1
+
+            # Firestore batch limit is 500
+            if count % 500 == 0:
+                batch.commit()
+                batch = get_db().batch()
+
+        # Commit remaining
+        if count % 500 != 0:
+            batch.commit()
+
+        return count
+
+    @staticmethod
+    async def get_category_stats_for_training() -> Dict[str, Dict]:
+        """
+        Get statistics about drawings per category for intelligent category selection
+
+        Returns:
+            Dict with category stats: {category: {count, avgConfidence}}
+        """
+        query = (
+            get_db()
+            .collection("user_drawings")
+            .where("usedForTraining", "==", False)
+            .stream()
+        )
+
+        stats = {}
+        for doc in query:
+            data = doc.to_dict()
+            category = data.get("targetCategory", "unknown")
+            confidence = data.get("aiConfidence", 0)
+
+            if category not in stats:
+                stats[category] = {"count": 0, "totalConfidence": 0}
+
+            stats[category]["count"] += 1
+            stats[category]["totalConfidence"] += confidence
+
+        # Calculate averages
+        for category in stats:
+            count = stats[category]["count"]
+            stats[category]["avgConfidence"] = (
+                stats[category]["totalConfidence"] / count if count > 0 else 0
+            )
+            del stats[category]["totalConfidence"]
+
+        return stats
+
+    @staticmethod
+    async def get_last_training_info() -> Optional[Dict]:
+        """
+        Get information about the last training run
+
+        Returns:
+            Dict with last training info or None
+        """
+        query = (
+            get_db()
+            .collection("training_runs")
+            .order_by("completedAt", direction=firestore.Query.DESCENDING)
+            .limit(1)
+            .stream()
+        )
+
+        for doc in query:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            return data
+
+        return None
+
+    @staticmethod
+    async def save_training_run(training_data: Dict) -> str:
+        """
+        Save information about a training run
+
+        Args:
+            training_data: Dictionary containing training metadata
+
+        Returns:
+            Document ID
+        """
+        doc_ref = get_db().collection("training_runs").document()
+        doc_ref.set({**training_data, "completedAt": firestore.SERVER_TIMESTAMP})
+        return doc_ref.id

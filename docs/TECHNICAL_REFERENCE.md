@@ -1,8 +1,8 @@
 # 📚 Technical Reference Guide
 
 **AI Pictionary - Big Data Project FISE3**  
-**Version:** 2.0.0  
-**Last Updated:** Janvier 2025
+**Version:** 2.1.0  
+**Last Updated:** Février 2025
 
 ---
 
@@ -106,7 +106,7 @@ AI Pictionary est une application cloud-native de reconnaissance de dessins insp
 
 ### Pourquoi Monolithique ?
 
-Le frontend utilise une architecture monolithique intentionnelle dans `NewFrontTest.jsx` (2502 lignes).
+Le frontend utilise une architecture monolithique intentionnelle dans `NewFrontTest.jsx` (~3000 lignes).
 
 **Avantages :**
 - État global partagé entre tous les composants inline
@@ -116,31 +116,40 @@ Le frontend utilise une architecture monolithique intentionnelle dans `NewFrontT
 
 **Composants Inline :**
 - `WelcomeScreen` - Écran d'accueil + backend health check
-- `GameModeSelection` - Sélection Classic/Race/Team
+- `GameModeSelection` - Sélection Classic/Race/Team/Free Canvas/Infinite
 - `TransitionOverlay` - Animations entre rounds
 - `MultiplayerFlow` - Lobby et waiting room
 - `PlayingScreen` - Canvas + prédictions + chat
+- `FreeCanvasScreen` - Mode test libre (Active Learning)
+- `InfiniteGameScreen` - Mode sans fin (Active Learning)
 - `GameOverScreen` - Résultats finaux
 
 ### State Machine
 
 ```
 WELCOME → MODE_SELECT → LOBBY_FLOW → PLAYING → GAME_OVER
-                              ↑          │
-                              └──────────┘ (new game)
+                │             ↑          │
+                │             └──────────┘ (new game)
+                │
+                ├─→ FREE_CANVAS (test libre)
+                └─→ INFINITE (mode sans fin)
 ```
 
 **États du jeu (`gameState`) :**
 - `WELCOME` - Page d'accueil, vérifie backend
-- `MODE_SELECT` - Choix du mode (Classic, Race, Team)
+- `MODE_SELECT` - Choix du mode (Classic, Race, Team, Free Canvas, Infinite)
 - `LOBBY_FLOW` - Création/join partie multiplayer
 - `PLAYING` - Partie en cours
+- `FREE_CANVAS` - Mode test libre
+- `INFINITE` - Mode sans fin
 - `GAME_OVER` - Écran final avec scores
 
 **Modes (`gameMode`) :**
 - `CLASSIC` - Solo contre l'IA
 - `RACE` - Course entre joueurs
 - `TEAM` - Équipe vs IA (guessing)
+- `FREE_CANVAS` - Test libre (contribue à l'Active Learning)
+- `INFINITE` - Mode sans fin (contribue à l'Active Learning)
 
 ### Composants Séparés
 
@@ -323,6 +332,130 @@ const [playerEmoji, setPlayerEmoji] = useState('😀');
 - Pas de friction à l'entrée
 - Pas de gestion de comptes
 - Expérience instantanée
+
+---
+
+## Active Learning Pipeline
+
+### Architecture
+
+Le système d'Active Learning permet d'améliorer le modèle avec les dessins des utilisateurs.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       COLLECTE DE DONNÉES                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   FREE CANVAS          INFINITE MODE                             │
+│   ┌─────────┐          ┌─────────────┐                          │
+│   │ Test    │          │ Auto-save   │                          │
+│   │ libre   │          │ @ 85%       │                          │
+│   └────┬────┘          │ confiance   │                          │
+│        │               └──────┬──────┘                          │
+│        │                      │                                  │
+│        └──────────┬──────────┘                                  │
+│                   │                                              │
+│                   ▼                                              │
+│         POST /drawings/save                                      │
+│                   │                                              │
+│                   ▼                                              │
+│         Firestore: user_drawings                                 │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     PIPELINE RETRAINING                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Cloud Scheduler (hebdomadaire)                                 │
+│            │                                                     │
+│            ▼                                                     │
+│   retrain_pipeline.py                                            │
+│            │                                                     │
+│            ├─→ Check seuil (500 dessins non utilisés)           │
+│            │                                                     │
+│            ▼                                                     │
+│   train_model_v4.py (si seuil atteint)                          │
+│            │                                                     │
+│            ├─→ Charge QuickDraw + user_drawings                  │
+│            ├─→ Entraîne CNN                                      │
+│            └─→ Upload nouveau modèle                             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Endpoints Active Learning
+
+| Route | Méthode | Description |
+|-------|---------|-------------|
+| `/drawings/save` | POST | Sauvegarde dessin pour training |
+| `/drawings/stats` | GET | Stats dessins collectés |
+| `/categories/weak` | GET | Catégories avec faible confiance |
+
+### SaveDrawingRequest Schema
+
+```python
+class SaveDrawingRequest(BaseModel):
+    image_data: str      # Base64 PNG
+    category: str        # Catégorie du dessin
+    confidence: float    # Confiance de la prédiction
+    was_correct: bool    # Si la prédiction était correcte (optionnel)
+```
+
+### Firestore Schema
+
+```
+user_drawings/{docId}
+├── image_data: string         # Base64 PNG
+├── category: string           # Catégorie
+├── confidence: number         # Confiance [0-1]
+├── was_correct: boolean       # Correcte ou non
+├── used_for_training: boolean # Déjà utilisé
+├── timestamp: timestamp       # Date création
+└── user_agent: string         # Info navigateur
+```
+
+### Sélection Intelligente (Mode Infinite)
+
+Le mode Infinite priorise les catégories où le modèle est faible :
+
+```javascript
+// Algorithme de sélection
+const getNextCategory = async () => {
+  const weakCategories = await api.get('/categories/weak');
+  
+  if (weakCategories.length > 0 && Math.random() < 0.7) {
+    // 70% chance de cibler une catégorie faible
+    return weakCategories[Math.floor(Math.random() * weakCategories.length)];
+  }
+  
+  // 30% chance aléatoire
+  return allCategories[Math.floor(Math.random() * allCategories.length)];
+};
+```
+
+### Training Script (train_model_v4.py)
+
+```python
+class QuickDrawTrainerV4:
+    def load_data(self, include_user_drawings=False):
+        # Charge données QuickDraw
+        X, y = self.load_quickdraw_data()
+        
+        if include_user_drawings:
+            # Charge dessins utilisateurs depuis Firestore
+            user_X, user_y = self.load_user_drawings()
+            X = np.concatenate([X, user_X])
+            y = np.concatenate([y, user_y])
+        
+        return X, y
+    
+    def train(self):
+        # Architecture CNN v4
+        model = self.build_model()
+        model.fit(X_train, y_train, validation_data=(X_val, y_val))
+        return model
+```
 
 ---
 

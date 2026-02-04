@@ -2,7 +2,7 @@
 
 Vue d'ensemble de l'état d'avancement du projet et des fonctionnalités implémentées.
 
-**Dernière mise à jour :** Janvier 2025  
+**Dernière mise à jour :** Février 2025  
 **Phase actuelle :** Production
 
 ---
@@ -25,6 +25,7 @@ Vue d'ensemble de l'état d'avancement du projet et des fonctionnalités implém
 Application web de dessin avec reconnaissance par CNN :
 - Prédictions temps réel TensorFlow (50 catégories, 90.2% accuracy)
 - Modes multijoueurs (Race Mode + Team vs IA)
+- Modes d'entraînement (Free Canvas + Infinite)
 - Infrastructure cloud scalable (Firebase + Cloud Run + RTDB)
 
 ### 🌐 URLs Production
@@ -99,13 +100,64 @@ Application web de dessin avec reconnaissance par CNN :
 
 ---
 
-### ⚠️ 2. Active Learning Pipeline (Partiel)
+### ✅ 2. Active Learning Pipeline (100%)
 
-**Backend :** ✅ Prêt
-- `POST /save_correction` - Sauvegarde corrections
+**Backend :**
+- `POST /drawings/save` - Sauvegarde dessins utilisateurs (image, catégorie, confidence, was_correct)
+- `GET /drawings/stats` - Statistiques dessins collectés
+- `GET /categories/weak` - Catégories avec faible confiance moyenne (pour ciblage intelligent)
 - `POST /admin/retrain` - Déclenche pipeline ML
 
-**Frontend :** ⚠️ Non visible dans l'UI actuelle
+**ML Training :**
+- `train_model_v4.py` - Script d'entraînement avec support Active Learning
+- `retrain_pipeline.py` - Pipeline automatisé avec seuil 500 dessins
+
+**Firestore :**
+- Collection `user_drawings` pour stockage des dessins
+- Champs : `image_data`, `category`, `confidence`, `was_correct`, `used_for_training`, `timestamp`
+
+**Frontend :** ✅ Visible via 2 nouveaux modes
+- **Mode Free Canvas** - Test libre avec sauvegarde manuelle
+- **Mode Infinite** - Auto-save à 85% confiance, sélection intelligente catégories
+
+---
+
+### ✅ 8. Mode Free Canvas (100%)
+
+**Concept :** Mode test libre pour expérimenter avec l'IA.
+
+**Fonctionnalités :**
+- Canvas plein écran sans timer ni contrainte
+- Top 5 prédictions en temps réel
+- Bouton "Save for Training" pour contribuer à l'Active Learning
+- Clear et Quitter dans le footer
+
+**Endpoints utilisés :**
+- `POST /predict` - Prédictions temps réel
+- `POST /drawings/save` - Sauvegarde dessin pour entraînement
+
+---
+
+### ✅ 9. Mode Infinite (100%)
+
+**Concept :** Jouer sans fin avec auto-collecte de données pour Active Learning.
+
+**Fonctionnalités :**
+- Pas de timer - jouer à son rythme
+- Auto-save quand confiance ≥ 85%
+- Sélection intelligente des catégories (priorise catégories faibles)
+- Bouton "Passer" pour changer de catégorie
+- Compteur de catégories réussies
+
+**Algorithme sélection catégorie :**
+1. Récupère catégories avec confiance moyenne < 80% via `/categories/weak`
+2. Si disponibles, sélectionne parmi celles-ci (70% chance)
+3. Sinon, sélection aléatoire parmi toutes les catégories
+
+**Endpoints utilisés :**
+- `POST /predict` - Prédictions temps réel
+- `POST /drawings/save` - Auto-save à 85% confiance
+- `GET /categories/weak` - Catégories à cibler
 
 ---
 
@@ -228,21 +280,26 @@ games/${roomCode}/
 
 ### Fichier Principal Monolithique
 
-**`frontend/src/NewFrontTest.jsx`** (2502 lignes)
+**`frontend/src/NewFrontTest.jsx`** (~3000 lignes)
 
 Contient tous les composants inline :
 - `WelcomeScreen` - Écran d'accueil avec check backend
-- `GameModeSelection` - Sélection mode (Classic/Race/Team)
+- `GameModeSelection` - Sélection mode (Classic/Race/Team/Free Canvas/Infinite)
 - `TransitionOverlay` - Transition entre rounds
 - `MultiplayerFlow` - Lobby et waiting room
 - `PlayingScreen` - Canvas + prédictions + chat
+- `FreeCanvasScreen` - Mode test libre (Active Learning)
+- `InfiniteGameScreen` - Mode infinite (Active Learning)
 - `GameOverScreen` - Résultats finaux
 
 **States Machine :**
 ```
 WELCOME → MODE_SELECT → LOBBY_FLOW → PLAYING → GAME_OVER
-                              ↑          │
-                              └──────────┘ (new game)
+                │             ↑          │
+                │             └──────────┘ (new game)
+                │
+                ├─→ FREE_CANVAS (test libre)
+                └─→ INFINITE (mode sans fin)
 ```
 
 ### Composants Séparés
@@ -267,11 +324,12 @@ WELCOME → MODE_SELECT → LOBBY_FLOW → PLAYING → GAME_OVER
 
 ### Vue d'ensemble
 
-**34 endpoints** organisés en 5 groupes :
+**38 endpoints** organisés en 7 groupes :
 
 | Groupe | Endpoints |
 |--------|-----------|
 | Core (default) | 5 |
+| Active Learning | 3 |
 | Administration | 6 |
 | Multiplayer Race | 8 |
 | Multiplayer Guessing | 11 |
