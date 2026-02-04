@@ -1314,24 +1314,17 @@ STATE MACHINE : FLOW DU JEU
   │ • Logo   │              │ • Team      │             │ • Waiting   │
   └──────────┘              │ • Free      │             └──────┬──────┘
                             │ • Infinite  │                    │
-                            └─────┬───────┘          all ready │
-                                  │                            ▼
-                           ┌──────┴──────┐             ┌───────────────┐
-                           │             │             │   PLAYING     │
-                 ┌─────────┼─────────────┼─────────────│               │
-                 │         │             │      end    │ • Canvas      │
-                 ▼         ▼             ▼             │ • Timer       │
-          ┌───────────┐ ┌────────┐ ┌──────────────┐   │ • Predictions │
-          │FREE_CANVAS│ │INFINITE│ │  GAME_OVER   │◄──└───────────────┘
-          │           │ │        │ │              │
-          │ • Test    │ │ • Sans │ │ • Scores     │
-          │   libre   │ │   fin  │ │ • Winner     │
-          │ • Save    │ │ • Auto │ │ • Play again │
-          └───────────┘ │   save │ └──────────────┘
-                        └────────┘         ↑
-                                           │ new game
-                                           ↓
-                                    MODE_SELECT
+                            └─────────────┘          all ready │
+                                   ↑                           │
+                                   │  new game                 │
+                                   │                           ▼
+                           ┌──────────────┐            ┌───────────────┐
+                           │  GAME_OVER   │            │   PLAYING     │
+                           │              │     end    │               │
+                           │ • Scores     │ ◄───────── │ • Canvas      │
+                           │ • Winner     │            │ • Timer       │
+                           │ • Play again │            │ • Predictions │
+                           └──────────────┘            └───────────────┘
 
 
 MODES DE JEU (gameMode)
