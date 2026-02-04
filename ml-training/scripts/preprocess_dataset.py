@@ -53,6 +53,8 @@ def apply_centroid_crop(img_array: np.ndarray) -> np.ndarray:
     Quick Draw dataset: bounding box centered on center of mass
     Improves model robustness to off-center user drawings
     Accuracy improvement: +3-5% in preliminary tests
+
+    Uses proper translation without circular wrap-around effects
     """
     # Reshape to 2D if needed
     if img_array.ndim == 1:
@@ -73,9 +75,26 @@ def apply_centroid_crop(img_array: np.ndarray) -> np.ndarray:
     shift_y = 14 - center_y
     shift_x = 14 - center_x
 
-    # Apply shift
-    shifted = np.roll(img_array, shift_y, axis=0)
-    shifted = np.roll(shifted, shift_x, axis=1)
+    # Create new image filled with white (255 for grayscale)
+    shifted = np.full_like(img_array, 255)
+
+    # Calculate source and destination slices
+    # Source: what part of the original image to copy
+    src_y_start = max(0, -shift_y)
+    src_y_end = min(img_array.shape[0], img_array.shape[0] - shift_y)
+    src_x_start = max(0, -shift_x)
+    src_x_end = min(img_array.shape[1], img_array.shape[1] - shift_x)
+
+    # Destination: where to place it in the new image
+    dst_y_start = max(0, shift_y)
+    dst_y_end = dst_y_start + (src_y_end - src_y_start)
+    dst_x_start = max(0, shift_x)
+    dst_x_end = dst_x_start + (src_x_end - src_x_start)
+
+    # Copy the shifted region
+    shifted[dst_y_start:dst_y_end, dst_x_start:dst_x_end] = img_array[
+        src_y_start:src_y_end, src_x_start:src_x_end
+    ]
 
     return shifted
 
