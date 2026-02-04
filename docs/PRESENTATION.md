@@ -874,36 +874,27 @@ DIAGRAMME DES COMMUNICATIONS
         │                                   │                               │
         ▼                                   ▼                               ▼
 ┌───────────────┐               ┌───────────────────┐               ┌───────────────┐
-│ FIREBASE      │               │   CLOUD RUN       │               │  FIREBASE     │
-│ HOSTING       │             ┌►│   (Backend)       │ ─────┐        │  RTDB         │
-│ (CDN)         │             │ │                   │      │        │               │
-│ :443 HTTPS    │             │ │ :443 HTTPS        │      │        │ :443 WSS      │
-└───────────────┘             │ └───────────────────┘      │        └───────────────┘
-        ↑                     │    │    │                  ▼            ↑   │
-        │                     │    │    │    ┌────────────────────┐     │   │
-        │                     │    │    │    │  FIREBASE STORAGE  │     │   │
-        │                     │    │    │    │ (models, drawings) │     │   │
-        │                     │    │    │    └────────────────────┘     │   │
-        │ 1. GET index.html   │    │    │                               │   │
-        │    + JS/CSS (80KB)  │    │    │ 4. Admin SDK                  │   │
-        │                     │    │    │ (gRPC)                        │   │
-        │                     │    │    ▼                               │   │
-┌───────────────┐             │    │   ┌───────────────────┐            │   │
-│   BROWSER     │─────────────┘    │   │    FIRESTORE      │            │   │
-│   (Client)    │ 2. REST API      │   │    (Database)     │            │   │
-│               │    /predict      │   │ corrections,      │            │   │
-│               │    /health       │   │ game metadata     │            │   │
-│               │    /categories   │   └───────────────────┘            │   │
-│               │                  │                                    │   │
-│               │ 3. WebSocket     │ 5. Admin SDK                       │   │
-│               │    (RTDB)        │ (présence)                         │   │
-│               │◄─────────────────┼────────────────────────────────────┘   │
-│               │                                                           │
+│ FIREBASE      │               │   CLOUD RUN       │ 5. Admin SDK  │  FIREBASE     │
+│ HOSTING       │             ┌►│   (Backend)       │  (présence)   │  RTDB         │
+│ (CDN)         │             │ │                   │──────────────→│               │
+│ :443 HTTPS    │             │ │ :443 HTTPS        │               │ :443 WSS      │
+└───────────────┘             │ └───────────────────┘               └───────────────┘
+        ↑                     │         │                               ↑   │
+        │  1. GET index.html  │         │  4. Admin SDK                 │   │
+        │  + JS/CSS (80KB)    │         │  (gRPC)                       │   │
+┌───────────────┐             │         ▼                               │   │
+│   BROWSER     │─────────────┘         ┌───────────────────┐           │   │
+│   (Client)    │ 2. REST API           │    FIRESTORE      │           │   │
+│               │    /predict           │    (Database)     │           │   │
+│               │    /health            │ corrections,      │           │   │
+│               │    /categories        │ game metadata     │           │   │
+│               │                       └───────────────────┘           │   │
+│               │ 3. WebSocket                                          │   │
+│               │    (RTDB)                                             │   │
+│               │───────────────────────────────────────────────────────┘   │
 └───────────────┘                                                           │
-                                                                            │
-                              (Optionnel - Non configuré en prod)           │
-                            ┌───────────────┐ 7. HTTPS POST /admin/retrain  │
-                            │ CLOUD         │───────────────────────────────┘
+                            ┌───────────────┐ 6. HTTPS POST /admin/retrain  │
+                            │ CLOUD         │←──────────────────────────────┘
                             │ SCHEDULER     │
                             └───────────────┘
 
@@ -918,18 +909,19 @@ DÉTAIL DES COMMUNICATIONS
 │ Browser      │ Cloud Run       │ HTTPS GET        │ /health, /categories       │
 │ Browser      │ Firebase RTDB   │ WebSocket (WSS)  │ Multiplayer: sync, chat,   │
 │              │                 │                  │ présence, état parties     │
-│ Cloud Run    │ Firestore       │ gRPC (Admin SDK) │ Sauvegarder corrections,   │
-│              │                 │                  │ metadata jeux              │
+│ Cloud Run    │ Firestore       │ gRPC (Admin SDK) │ Sauvegarder user_drawings  │
+│              │                 │                  │ (Active Learning base64)   │
 │ Cloud Run    │ Firebase RTDB   │ Admin SDK        │ Valider présence joueurs   │
-│ Cloud Run    │ Firebase Storage│ Admin SDK        │ Upload modèles/drawings    │
-│              │                 │                  │ (Active Learning)          │
 │ (Scheduler)  │ Cloud Run       │ HTTPS POST       │ /admin/retrain (optionnel) │
 └──────────────┴─────────────────┴──────────────────┴────────────────────────────┘
 
 ⚠️ NOTES:
-• Le frontend N'UTILISE PAS Firestore ni Storage directement
+• Le frontend N'UTILISE PAS Firestore directement (tout passe par le backend)
 • Tout le multiplayer passe par RTDB (temps réel)
-• Cloud Scheduler est documenté mais non configuré en prod
+• Firebase Storage est configuré mais NON UTILISÉ (dossiers vides)
+• Les dessins Active Learning sont stockés en base64 dans Firestore (user_drawings)
+• Les modèles .h5 sont stockés localement dans backend/models/
+• Cloud Scheduler configuré : job "retrain-model-weekly" (dimanche 2h)
 ```
 
 ### 🎤 Script présentateur
@@ -939,8 +931,8 @@ DÉTAIL DES COMMUNICATIONS
 - **Hosting :** CDN global, cache 1 an pour assets statiques
 - **Cloud Run URL :** `https://ai-pictionary-backend-*.europe-west1.run.app`
 - **RTDB WebSocket :** Connexion persistante via Firebase SDK (`onValue`, `set`, `update`)
-- **Firestore :** Utilisé **uniquement par le backend** (corrections, metadata)
-- **Storage :** Utilisé **uniquement par le backend** (modèles .h5, drawings PNG)
+- **Firestore :** Utilisé **uniquement par le backend** (user_drawings base64, users, models metadata)
+- **Storage :** ⚠️ **NON UTILISÉ** - dossiers configurés mais vides
 - **Frontend services :** `multiplayerService.js` (RTDB), `api.js` (REST Cloud Run)
 
 ### ❓ Questions potentielles
@@ -970,26 +962,27 @@ DÉTAIL DES COMMUNICATIONS
 FIREBASE : POURQUOI ET COMMENT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-┌─────────────────────────────────────────────────────────────────┐
-│  📄 FIRESTORE                      │  📦 STORAGE                 │
-│  ─────────────                     │  ──────────                │
-│  Usage: Métadonnées persistantes   │  Usage: Fichiers binaires  │
-│  • games/ (état parties)           │  • models/ (.h5 files)     │
-│  • corrections/ (Active Learning)  │  • drawings/ (PNG)         │
-│                                    │                            │
-│  Pourquoi: Requêtes complexes,     │  Pourquoi: CDN intégré,    │
-│  indexes automatiques              │  règles sécurité           │
-├─────────────────────────────────────────────────────────────────┤
-│  ⚡ REALTIME DATABASE               │ 🔐 AUTH (non utilisé)      │
-│  ───────────────────               │  ─────────────────────     │
-│  Usage: Sync temps réel            │  Configuré mais désactivé  │
-│  • currentDrawing (100ms sync)     │  Raison: Simplicité UX     │
-│  • chat/ (messages)                │  Alternative: Pseudo+emoji │
-│  • presence/ (online/offline)      │                            │
-│                                    │                            │
-│  Pourquoi: Latence 20-50ms         │  Prévu Phase 3 pour        │
-│  vs 100-200ms Firestore            │  leaderboard persistant    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  📄 FIRESTORE                      │  ⚡ REALTIME DATABASE        │
+│  ─────────────                     │  ───────────────────        │
+│  Usage: Données persistantes       │  Usage: Sync temps réel     │
+│  • user_drawings/ (Active Learning)│  • games/ (parties multi)   │
+│  • users/ (profils, stats)         │  • chat/ (messages)         │
+│  • models/ (metadata versions)     │  • presence/ (online/off)   │
+│                                    │                             │
+│  Pourquoi: Requêtes complexes,     │  Pourquoi: Latence 20-50ms  │
+│  indexes auto, base64 inline       │  vs 100-200ms Firestore     │
+├──────────────────────────────────────────────────────────────────┤
+│  🔐 AUTH (Phase 3)                 │  📊 ANALYTICS (Phase 3)      │
+│  ─────────────────                 │  ──────────────────────     │
+│  Actuellement: Non utilisé         │  Actuellement: Non utilisé  │
+│  Raison: Simplicité UX             │  Potentiel:                 │
+│  Alternative: Pseudo + emoji       │  • Tracking catégories      │
+│                                    │  • Temps de dessin moyen    │
+│  Prévu Phase 3:                    │  • Taux de réussite par     │
+│  • Leaderboard persistant          │    mode de jeu              │
+│  • Historique personnel            │  • Métriques Active Learning│
+└──────────────────────────────────────────────────────────────────┘
 
 COMPARAISON FIREBASE vs AWS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1007,11 +1000,11 @@ VERDICT: Firebase = Développement 5x plus rapide pour ce cas
 ```
 
 ### 🎤 Script présentateur
-> "Pourquoi Firebase ? Firestore stocke nos métadonnées de parties et les corrections pour l'Active Learning - ses requêtes complexes et indexes automatiques sont idéaux. Storage héberge les modèles et dessins avec un CDN intégré. La **Realtime Database** est notre choix clé pour le multijoueur : sa latence de 20-50ms permet de synchroniser le canvas du dessinateur vers les spectateurs en temps réel. Firestore serait trop lent à 100-200ms. Comparé à AWS, Firebase nous a fait gagner un temps considérable : le SDK frontend est intégré, le real-time est built-in, et le coût est quasi nul. C'est du développement 5 fois plus rapide pour notre cas d'usage."
+> "Pourquoi Firebase ? Nous utilisons **deux services activement**. Firestore stocke les données persistantes : les dessins pour l'Active Learning en base64, les profils utilisateurs, et les métadonnées des modèles. La **Realtime Database** gère tout le multiplayer temps réel avec une latence de 20-50ms - parties, chat, présence. Pour la Phase 3, nous prévoyons d'activer Firebase Auth pour un leaderboard persistant, et Firebase Analytics pour tracker les métriques d'utilisation et améliorer l'Active Learning. Comparé à AWS, Firebase nous a fait gagner un temps considérable grâce au SDK intégré et au real-time built-in."
 
 ### 📚 Informations de fond
 - **RTDB structure :** INFRASTRUCTURE.md
-- **Firestore collections :** games/, corrections/
+- **Firestore collections :** user_drawings/, users/, models/
 - **Comparatif détaillé :** TECHNICAL_REFERENCE.md
 
 ### ❓ Questions potentielles
