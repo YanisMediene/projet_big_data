@@ -135,11 +135,11 @@ projet_big_data/
 
 | Document | Description |
 | --- | --- |
-| [GETTING_STARTED.md](https://www.google.com/search?q=docs/GETTING_STARTED.md) | Guide démarrage rapide |
-| [DEVELOPMENT.md](https://www.google.com/search?q=docs/DEVELOPMENT.md) | Workflow développement local et environnements |
-| [INFRASTRUCTURE.md](https://www.google.com/search?q=docs/INFRASTRUCTURE.md) | Configuration Firebase, Cloud Run et RTDB |
-| [PROJECT_STATUS.md](https://www.google.com/search?q=docs/PROJECT_STATUS.md) | État d'avancement des phases et nouvelles features |
-| [TECHNICAL_REFERENCE.md](https://www.google.com/search?q=docs/TECHNICAL_REFERENCE.md) | Architecture détaillée, décisions techniques et analyse des coûts |
+| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Guide démarrage rapide |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Workflow développement local et environnements |
+| [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) | Configuration Firebase, Cloud Run et RTDB |
+| [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | État d'avancement des phases et nouvelles features |
+| [TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) | Architecture détaillée, décisions techniques et analyse des coûts |
 
 ---
 
