@@ -1,0 +1,44 @@
+{
+  "version": "v5.0.0_100cat",
+  "created_at": "2026-02-04T23:25:52.971967",
+  "test_accuracy": 0.859279990196228,
+  "categories": [
+    "cat", "dog", "fish", "bird", "butterfly",
+    "elephant", "horse", "rabbit", "shark", "bee",
+    "bear", "frog", "ant", "crab", "octopus",
+    "snail", "penguin", "owl", "spider", "duck",
+    "flamingo", "kangaroo",
+
+    "apple", "banana", "pizza", "hamburger",
+    "cake", "ice cream", "carrot", "pineapple",
+    "bread", "donut", "hot dog", "grapes",
+    "watermelon", "strawberry", "broccoli", "cookie",
+
+    "airplane", "car", "bicycle", "train",
+    "bus", "sailboat",
+
+    "tree", "flower", "sun", "cloud",
+    "mountain", "rainbow", "leaf", "mushroom",
+    "cactus", "palm tree",
+
+    "book", "chair", "cup", "telephone",
+    "clock", "key", "umbrella", "shoe",
+    "camera", "guitar", "scissors", "hammer",
+    "screwdriver", "pencil", "eraser", "envelope",
+    "backpack", "toothbrush", "paintbrush", "candle",
+    "pants", "sweater",
+
+    "drums", "piano", "violin", "saxophone",
+
+    "t-shirt", "hat", "sock",
+
+    "basketball", "baseball bat", "tennis racquet",
+    "soccer ball", "skateboard",
+
+    "circle", "star", "moon", "smiley face",
+
+    "house", "castle", "lighthouse", "The Eiffel Tower",
+    "bridge", "windmill", "barn", "church"
+  ],
+  "num_classes": 100
+}

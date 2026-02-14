@@ -963,7 +963,7 @@ FIREBASE : POURQUOI ET COMMENT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ┌──────────────────────────────────────────────────────────────────┐
-│  📄 FIRESTORE                      │  ⚡ REALTIME DATABASE        │
+│  📄 FIRESTORE                      │  ⚡ REALTIME DATABASE         │
 │  ─────────────                     │  ───────────────────        │
 │  Usage: Données persistantes       │  Usage: Sync temps réel     │
 │  • user_drawings/ (Active Learning)│  • games/ (parties multi)   │
